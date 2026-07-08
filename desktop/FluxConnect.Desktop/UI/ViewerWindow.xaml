@@ -1,0 +1,123 @@
+<Window x:Class="FluxConnect.Desktop.UI.ViewerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FluxConnect - Uzak Oturum"
+        Height="720" Width="1280"
+        Background="{StaticResource BackgroundBrush}"
+        WindowStartupLocation="CenterScreen"
+        FontFamily="{StaticResource MainFont}">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <!-- Kontrol Çubuğu (Üst Toolbar) -->
+            <RowDefinition Height="50"/>
+            <!-- Ekran İçeriği -->
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Üst Toolbar -->
+        <Border Grid.Row="0"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <Grid Margin="16,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Bağlı Olan Makine: "
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               FontSize="14"/>
+                    <TextBlock x:Name="TxtPeerName"
+                               Text="Bilinmiyor"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               FontSize="14"
+                               FontWeight="SemiBold"/>
+                </StackPanel>
+
+                <!-- Ekran Seçici -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Visibility="Collapsed" x:Name="ScreenSelectorPanel">
+                    <TextBlock Text="Ekran: "
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <ComboBox x:Name="CmbScreen"
+                              Style="{StaticResource ModernComboBox}"
+                              MinWidth="180"
+                              FontSize="13"
+                              SelectionChanged="CmbScreen_SelectionChanged"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- Medya Kontrolleri -->
+                    <Button x:Name="BtnMic"
+                            Style="{StaticResource IconButton}"
+                            Content="🎙️"
+                            ToolTip="Mikrofon (Kapalı)"
+                            FontSize="18"
+                            Padding="8,4"
+                            Margin="0,0,4,0"
+                            Click="BtnMic_Click"/>
+                    <Button x:Name="BtnSysAudio"
+                            Style="{StaticResource IconButton}"
+                            Content="🔊"
+                            ToolTip="Sistem Sesi (Kapalı)"
+                            FontSize="18"
+                            Padding="8,4"
+                            Margin="0,0,4,0"
+                            Click="BtnSysAudio_Click"/>
+                    <Button x:Name="BtnWebcam"
+                            Style="{StaticResource IconButton}"
+                            Content="📷"
+                            ToolTip="Webcam (Kapalı)"
+                            FontSize="18"
+                            Padding="8,4"
+                            Margin="0,0,16,0"
+                            Click="BtnWebcam_Click"/>
+
+                    <Button x:Name="BtnSendFile"
+                            Style="{StaticResource IconButton}"
+                            Content="📁"
+                            ToolTip="Dosya Gönder"
+                            FontSize="18"
+                            Padding="8,4"
+                            Margin="0,0,16,0"
+                            Click="BtnSendFile_Click"/>
+
+                    <Button x:Name="BtnEndSession"
+                            Content="Bağlantıyı Kes"
+                            Style="{StaticResource DangerButton}"
+                            Padding="12,6"
+                            Click="BtnEndSession_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Ekran Alanı -->
+        <Border Grid.Row="1" Background="Black">
+            <!-- Asıl ekran görüntüsü bu imajın içinde olacak -->
+            <Image x:Name="RemoteScreen"
+                   Stretch="Uniform"/>
+        </Border>
+
+
+
+        <!-- Yükleniyor / Bilgi Overlay -->
+        <Border x:Name="OverlayPanel" 
+                Grid.Row="1" 
+                Background="{StaticResource OverlayScrimBrush}"
+                Visibility="Visible">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <TextBlock Text="Görüntü bekleniyor..."
+                           Foreground="{StaticResource TextOnDarkBrush}"
+                           FontSize="18"
+                           FontWeight="SemiBold"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
