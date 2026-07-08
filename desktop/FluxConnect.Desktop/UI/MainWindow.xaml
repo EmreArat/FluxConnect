@@ -1,15 +1,36 @@
 <Window x:Class="FluxConnect.Desktop.UI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:controls="clr-namespace:FluxConnect.Desktop.UI.Controls"
         Title="FluxConnect"
         Height="600" Width="900"
         MinHeight="560" MinWidth="800"
         WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        ResizeMode="CanResize"
         Background="{StaticResource BackgroundBrush}"
         FontFamily="{StaticResource MainFont}"
         Icon="pack://application:,,,/app.ico">
 
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="32"
+                            ResizeBorderThickness="6"
+                            GlassFrameThickness="0"
+                            CornerRadius="0"
+                            UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <controls:WindowTitleBar Grid.Row="0"
+                                 Title="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"/>
+
+        <Grid Grid.Row="1">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="280"/>
             <ColumnDefinition Width="*"/>
@@ -231,26 +252,60 @@
             <!-- Kişi Listesi -->
             <Border Grid.Row="2"
                     Style="{StaticResource Card}"
-                    Margin="0,16,0,0">
+                    Margin="0,16,0,0"
+                    Padding="16,16,16,12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0"
-                               Text="SON BAĞLANTILAR"
-                               Foreground="{StaticResource TextMutedBrush}"
-                               FontSize="10"
-                               FontWeight="Bold"/>
+                    <Border Grid.Row="0"
+                            Background="{StaticResource SurfaceLightBrush}"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="3">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="BtnTabRecent"
+                                    Grid.Column="0"
+                                    Content="Son Bağlantılar"
+                                    Style="{StaticResource ContactTabButton}"
+                                    Click="BtnTabRecent_Click"/>
+                            <Button x:Name="BtnTabFavorites"
+                                    Grid.Column="1"
+                                    Content="Sık Kullanılanlar"
+                                    Style="{StaticResource ContactTabButton}"
+                                    Click="BtnTabFavorites_Click"/>
+                        </Grid>
+                    </Border>
 
-                    <ScrollViewer Grid.Row="1"
-                                  Margin="0,8,0,0"
-                                  VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel x:Name="ContactsList">
-                            <TextBlock x:Name="TxtNoContacts"
+                    <ScrollViewer x:Name="RecentScrollViewer"
+                                  Grid.Row="1"
+                                  Style="{StaticResource ModernScrollViewer}"
+                                  Margin="0,10,0,0">
+                        <StackPanel x:Name="RecentContactsList">
+                            <TextBlock x:Name="TxtNoRecent"
                                        Text="Henüz bağlantı yok."
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="12"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,8,0,8"/>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <ScrollViewer x:Name="FavoritesScrollViewer"
+                                  Grid.Row="1"
+                                  Style="{StaticResource ModernScrollViewer}"
+                                  Margin="0,10,0,0"
+                                  Visibility="Collapsed">
+                        <StackPanel x:Name="FavoritesContactsList">
+                            <TextBlock x:Name="TxtNoFavorites"
+                                       Text="Sık kullanılan eklenmemiş."
                                        Foreground="{StaticResource TextMutedBrush}"
                                        FontSize="12"
                                        HorizontalAlignment="Center"
@@ -259,6 +314,7 @@
                     </ScrollViewer>
                 </Grid>
             </Border>
+        </Grid>
         </Grid>
     </Grid>
 </Window>

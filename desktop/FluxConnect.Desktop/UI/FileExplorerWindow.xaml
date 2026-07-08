@@ -1,11 +1,25 @@
 <Window x:Class="FluxConnect.Desktop.UI.FileExplorerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:controls="clr-namespace:FluxConnect.Desktop.UI.Controls"
         Title="FluxConnect - Dosya Yöneticisi" Height="650" Width="1000"
         WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        ResizeMode="CanResize"
         Background="{StaticResource BackgroundBrush}"
         Foreground="{StaticResource TextPrimaryBrush}"
-        FontFamily="{StaticResource MainFont}">
+        FontFamily="{StaticResource MainFont}"
+        Icon="pack://application:,,,/app.ico">
+
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="32"
+                            ResizeBorderThickness="6"
+                            GlassFrameThickness="0"
+                            CornerRadius="0"
+                            UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+
     <Window.Resources>
         <HierarchicalDataTemplate x:Key="TreeTemplate" ItemsSource="{Binding Children}">
             <StackPanel Orientation="Horizontal" Margin="2">
@@ -18,100 +32,104 @@
         </HierarchicalDataTemplate>
     </Window.Resources>
 
-    <Grid Margin="10">
+    <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="Auto"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
+        <controls:WindowTitleBar Grid.Row="0"
+                                 Title="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"/>
 
-        <!-- Sol Taraf Başlık -->
-        <Border Grid.Row="0" Grid.Column="0"
-                Style="{StaticResource PanelHeader}"
-                Margin="0,0,5,5">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <Button Grid.Column="0"
-                        Content="🔄 Yenile"
-                        Style="{StaticResource SecondaryButton}"
-                        Padding="10,5"
-                        Click="BtnLocalRefresh_Click"/>
-                <TextBlock Grid.Column="1"
-                           x:Name="TxtLocalPath"
-                           VerticalAlignment="Center"
-                           Margin="10,0,0,0"
-                           Text="Yerel Bilgisayar"
-                           TextTrimming="CharacterEllipsis"/>
-            </Grid>
-        </Border>
+        <Grid Grid.Row="1" Margin="10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
 
-        <!-- Sol Liste (Yerel Ağaç) -->
-        <TreeView x:Name="LocalTreeView"
-                  Grid.Row="1" Grid.Column="0"
-                  Background="{StaticResource SurfaceBrush}"
-                  Foreground="{StaticResource TextPrimaryBrush}"
-                  BorderBrush="{StaticResource BorderBrush}"
-                  BorderThickness="1"
-                  ItemContainerStyle="{StaticResource ModernTreeViewItem}"
-                  ItemTemplate="{StaticResource TreeTemplate}"
-                  SelectedItemChanged="LocalTreeView_SelectedItemChanged"/>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-        <!-- Ortadaki Transfer Butonları -->
-        <StackPanel Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" Margin="10">
-            <Button Content="➡️ Gönder"
-                    Style="{StaticResource PrimaryButton}"
-                    FontSize="14"
-                    Padding="15,10"
-                    Click="BtnSend_Click"/>
-            <Button Content="⬅️ Al"
-                    Style="{StaticResource AccentButton}"
-                    FontSize="14"
-                    Padding="15,10"
-                    Margin="0,15,0,0"
-                    Click="BtnReceive_Click"/>
-        </StackPanel>
+            <Border Grid.Row="0" Grid.Column="0"
+                    Style="{StaticResource PanelHeader}"
+                    Margin="0,0,5,5">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Content="🔄 Yenile"
+                            Style="{StaticResource SecondaryButton}"
+                            Padding="10,5"
+                            Click="BtnLocalRefresh_Click"/>
+                    <TextBlock Grid.Column="1"
+                               x:Name="TxtLocalPath"
+                               VerticalAlignment="Center"
+                               Margin="10,0,0,0"
+                               Text="Yerel Bilgisayar"
+                               TextTrimming="CharacterEllipsis"/>
+                </Grid>
+            </Border>
 
-        <!-- Sağ Taraf Başlık -->
-        <Border Grid.Row="0" Grid.Column="2"
-                Style="{StaticResource PanelHeader}"
-                Margin="5,0,0,5">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <Button Grid.Column="0"
-                        Content="🔄 Yenile"
-                        Style="{StaticResource SecondaryButton}"
-                        Padding="10,5"
-                        Click="BtnRemoteRefresh_Click"/>
-                <TextBlock Grid.Column="1"
-                           x:Name="TxtRemotePath"
-                           VerticalAlignment="Center"
-                           Margin="10,0,0,0"
-                           Text="Karşı Bilgisayar (Yükleniyor...)"
-                           TextTrimming="CharacterEllipsis"/>
-            </Grid>
-        </Border>
+            <TreeView x:Name="LocalTreeView"
+                      Grid.Row="1" Grid.Column="0"
+                      Background="{StaticResource SurfaceBrush}"
+                      Foreground="{StaticResource TextPrimaryBrush}"
+                      BorderBrush="{StaticResource BorderBrush}"
+                      BorderThickness="1"
+                      ItemContainerStyle="{StaticResource ModernTreeViewItem}"
+                      ItemTemplate="{StaticResource TreeTemplate}"
+                      SelectedItemChanged="LocalTreeView_SelectedItemChanged"/>
 
-        <!-- Sağ Liste (Uzak Ağaç) -->
-        <TreeView x:Name="RemoteTreeView"
-                  Grid.Row="1" Grid.Column="2"
-                  Background="{StaticResource SurfaceBrush}"
-                  Foreground="{StaticResource TextPrimaryBrush}"
-                  BorderBrush="{StaticResource BorderBrush}"
-                  BorderThickness="1"
-                  ItemContainerStyle="{StaticResource ModernTreeViewItem}"
-                  ItemTemplate="{StaticResource TreeTemplate}"
-                  SelectedItemChanged="RemoteTreeView_SelectedItemChanged"/>
+            <StackPanel Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" Margin="10">
+                <Button Content="➡️ Gönder"
+                        Style="{StaticResource PrimaryButton}"
+                        FontSize="14"
+                        Padding="15,10"
+                        Click="BtnSend_Click"/>
+                <Button Content="⬅️ Al"
+                        Style="{StaticResource AccentButton}"
+                        FontSize="14"
+                        Padding="15,10"
+                        Margin="0,15,0,0"
+                        Click="BtnReceive_Click"/>
+            </StackPanel>
 
+            <Border Grid.Row="0" Grid.Column="2"
+                    Style="{StaticResource PanelHeader}"
+                    Margin="5,0,0,5">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Content="🔄 Yenile"
+                            Style="{StaticResource SecondaryButton}"
+                            Padding="10,5"
+                            Click="BtnRemoteRefresh_Click"/>
+                    <TextBlock Grid.Column="1"
+                               x:Name="TxtRemotePath"
+                               VerticalAlignment="Center"
+                               Margin="10,0,0,0"
+                               Text="Karşı Bilgisayar (Yükleniyor...)"
+                               TextTrimming="CharacterEllipsis"/>
+                </Grid>
+            </Border>
+
+            <TreeView x:Name="RemoteTreeView"
+                      Grid.Row="1" Grid.Column="2"
+                      Background="{StaticResource SurfaceBrush}"
+                      Foreground="{StaticResource TextPrimaryBrush}"
+                      BorderBrush="{StaticResource BorderBrush}"
+                      BorderThickness="1"
+                      ItemContainerStyle="{StaticResource ModernTreeViewItem}"
+                      ItemTemplate="{StaticResource TreeTemplate}"
+                      SelectedItemChanged="RemoteTreeView_SelectedItemChanged"/>
+        </Grid>
     </Grid>
 </Window>

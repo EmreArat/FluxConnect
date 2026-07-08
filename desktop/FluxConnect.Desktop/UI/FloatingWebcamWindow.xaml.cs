@@ -1,6 +1,5 @@
 using System.IO;
 using System.Windows;
-using System.Windows.Input;
 
 namespace FluxConnect.Desktop.UI;
 
@@ -18,8 +17,16 @@ public partial class FloatingWebcamWindow : Window
     public FloatingWebcamWindow(string peerName)
     {
         InitializeComponent();
-        TxtTitle.Text = $"{peerName}'in Kamerası";
+        TitleBar.Title = $"{peerName}'in Kamerası";
+        Title = TitleBar.Title;
         PositionToTopRight();
+
+        Closing += (_, e) =>
+        {
+            e.Cancel = true;
+            OnUserClosed?.Invoke();
+            Hide();
+        };
     }
 
     /// <summary>Ekranın sağ üst köşesine konumla (biraz içeride)</summary>
@@ -42,21 +49,7 @@ public partial class FloatingWebcamWindow : Window
         }
     }
 
-    // ---- Sürükleme ----
-    private void Border_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ClickCount == 1)
-            DragMove();
-    }
-
-    // ---- Kapat ----
-    private void BtnClose_Click(object sender, RoutedEventArgs e)
-    {
-        OnUserClosed?.Invoke();
-        Hide();
-    }
-
-    /// <summary>Pencereyi tamamen kapatmak yerine gizle (yeniden kullanılabilir)</summary>
+    // ---- Kapat: WindowTitleBar Close → Closing olayı Hide() çağırır ----
     public new void Hide()
     {
         _hasFrame = false;

@@ -1,6 +1,5 @@
 using System;
 using System.Windows;
-using System.Windows.Input;
 
 namespace FluxConnect.Desktop.UI;
 
@@ -17,11 +16,6 @@ public partial class FloatingTransferWindow : Window
             this.Left = desktopWorkingArea.Right - this.Width - 20;
             this.Top = desktopWorkingArea.Bottom - this.Height - 20;
         };
-    }
-
-    private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        DragMove();
     }
 
     public void UpdateProgress(string title, string filename, double progress)

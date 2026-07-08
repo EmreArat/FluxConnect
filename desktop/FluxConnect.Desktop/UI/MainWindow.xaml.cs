@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private FluxConnect.Desktop.Core.Network.FileSystemManager? _targetFsManager;
     private FloatingTransferWindow? _targetTransferWindow;
     private string? _pendingHardwareConnect;
+    private bool _showFavoritesTab;
 
     public MainWindow()
     {
@@ -53,7 +54,33 @@ public partial class MainWindow : Window
         TxtLocalIp.Text = $"Sizin IP adresiniz: {App.LanServer.GetLocalIpAddress()}";
 
         // Kişi listesini oluştur
+        SetActiveContactTab(false);
         BuildContactsList();
+    }
+
+    private void BtnTabRecent_Click(object sender, RoutedEventArgs e) => SetActiveContactTab(false);
+
+    private void BtnTabFavorites_Click(object sender, RoutedEventArgs e) => SetActiveContactTab(true);
+
+    private void SetActiveContactTab(bool favorites)
+    {
+        _showFavoritesTab = favorites;
+
+        RecentScrollViewer.Visibility = favorites ? Visibility.Collapsed : Visibility.Visible;
+        FavoritesScrollViewer.Visibility = favorites ? Visibility.Visible : Visibility.Collapsed;
+
+        ApplyTabButtonStyle(BtnTabRecent, !favorites);
+        ApplyTabButtonStyle(BtnTabFavorites, favorites);
+    }
+
+    private void ApplyTabButtonStyle(Button btn, bool selected)
+    {
+        btn.Background = selected
+            ? (Brush)FindResource("PrimaryBrush")
+            : System.Windows.Media.Brushes.Transparent;
+        btn.Foreground = selected
+            ? (Brush)FindResource("TextOnDarkBrush")
+            : (Brush)FindResource("TextSecondaryBrush");
     }
 
     // ----------------------------------------------------------------
@@ -602,40 +629,88 @@ public partial class MainWindow : Window
     // ----------------------------------------------------------------
     private void BuildContactsList()
     {
-        // ContactsList'teki TxtNoContacts haricindeki elemanları temizle
-        for (int i = ContactsList.Children.Count - 1; i >= 0; i--)
+        PopulateContactPanel(
+            RecentContactsList,
+            TxtNoRecent,
+            App.Config.Contacts
+                .Where(c => !c.IsFavorite)
+                .OrderByDescending(c => c.LastConnected ?? DateTime.MinValue),
+            "Henüz bağlantı yok.");
+
+        PopulateContactPanel(
+            FavoritesContactsList,
+            TxtNoFavorites,
+            App.Config.Contacts
+                .Where(c => c.IsFavorite)
+                .OrderByDescending(c => c.LastConnected ?? DateTime.MinValue),
+            "Sık kullanılan eklenmemiş.");
+
+        var relayIds = App.Config.Contacts
+            .Where(c => c.IsRelayContact)
+            .Select(c => c.Address)
+            .Distinct()
+            .ToArray();
+
+        if (relayIds.Length > 0 && App.Relay != null && App.Relay.IsConnected)
+            _ = App.Session.SubscribePresenceAsync(relayIds);
+    }
+
+    private void PopulateContactPanel(
+        StackPanel panel,
+        TextBlock emptyLabel,
+        IEnumerable<SavedContact> contacts,
+        string emptyMessage)
+    {
+        for (int i = panel.Children.Count - 1; i >= 0; i--)
         {
-            if (ContactsList.Children[i] != TxtNoContacts)
-                ContactsList.Children.RemoveAt(i);
+            if (panel.Children[i] != emptyLabel)
+                panel.Children.RemoveAt(i);
         }
 
-        var contacts = App.Config.Contacts
-            .OrderByDescending(c => c.IsFavorite)
-            .ThenByDescending(c => c.LastConnected ?? DateTime.MinValue)
-            .ToList();
-
-        if (contacts.Count == 0)
+        var list = contacts.ToList();
+        if (list.Count == 0)
         {
-            TxtNoContacts.Visibility = Visibility.Visible;
+            emptyLabel.Text = emptyMessage;
+            emptyLabel.Visibility = Visibility.Visible;
             return;
         }
 
-        TxtNoContacts.Visibility = Visibility.Collapsed;
+        emptyLabel.Visibility = Visibility.Collapsed;
+        foreach (var contact in list)
+            panel.Children.Add(CreateContactRow(contact));
+    }
 
-        var contactIds = contacts
-            .Where(c => c.Address.Length == 9 && c.Address.All(char.IsDigit))
-            .Select(c => c.Address).ToArray();
-        
-        if (contactIds.Length > 0 && App.Relay != null && App.Relay.IsConnected)
-        {
-            _ = App.Session.SubscribePresenceAsync(contactIds);
-        }
+    private static string GetContactSubtitle(SavedContact contact)
+    {
+        if (contact.IsRelayContact)
+            return FormatId(contact.Address);
 
-        foreach (var contact in contacts)
+        if (!string.IsNullOrEmpty(contact.HardwareId))
+            return $"GUID: {HardwareIdProvider.FormatDisplay(contact.HardwareId)}";
+
+        if (contact.Address.StartsWith("hw:", StringComparison.OrdinalIgnoreCase))
+            return contact.Address;
+
+        return contact.Address;
+    }
+
+    private static bool ContactsMatch(SavedContact a, SavedContact b)
+    {
+        if (!string.IsNullOrEmpty(a.HardwareId) && !string.IsNullOrEmpty(b.HardwareId))
+            return string.Equals(a.HardwareId, b.HardwareId, StringComparison.OrdinalIgnoreCase);
+
+        return string.Equals(a.Address, b.Address, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFromContactAction(DependencyObject? source)
+    {
+        while (source != null)
         {
-            var row = CreateContactRow(contact);
-            ContactsList.Children.Add(row);
+            if (source is Button)
+                return true;
+            source = VisualTreeHelper.GetParent(source);
         }
+        return false;
     }
 
     private static string FormatLastConnected(DateTime? lastConnected)
@@ -655,7 +730,7 @@ public partial class MainWindow : Window
 
     private static Button CreateContactActionButton(string content, string tooltip, double fontSize = 12)
     {
-        var btn = new Button
+        return new Button
         {
             Content = content,
             FontSize = fontSize,
@@ -668,26 +743,27 @@ public partial class MainWindow : Window
             MinHeight = 22,
             VerticalAlignment = VerticalAlignment.Center
         };
-        btn.PreviewMouseLeftButtonDown += (_, e) => e.Handled = true;
-        return btn;
     }
 
     private void RemoveContact(SavedContact contact)
     {
         var displayName = string.IsNullOrWhiteSpace(contact.DisplayName)
-            ? contact.Address
+            ? GetContactSubtitle(contact)
             : contact.DisplayName;
 
         if (MessageBox.Show(
-                $"'{displayName}' son bağlantılar listesinden kaldırılsın mı?",
+                $"'{displayName}' listeden kaldırılsın mı?",
                 "Bağlantıyı Kaldır",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
 
-        App.Config.Contacts.RemoveAll(c =>
-            c.Address == contact.Address &&
-            string.Equals(c.HardwareId ?? "", contact.HardwareId ?? "", StringComparison.OrdinalIgnoreCase));
+        var removed = App.Config.Contacts.Remove(contact);
+        if (!removed)
+            removed = App.Config.Contacts.RemoveAll(c => ContactsMatch(c, contact)) > 0;
+
+        if (!removed)
+            return;
 
         ConfigManager.Save(App.Config);
         BuildContactsList();
@@ -695,16 +771,12 @@ public partial class MainWindow : Window
 
     private Border CreateContactRow(SavedContact contact)
     {
-        var isOnline = _presenceCache.TryGetValue(contact.Address, out var online) && online;
+        var isOnline = contact.IsRelayContact &&
+                       _presenceCache.TryGetValue(contact.Address, out var online) && online;
         var isId = contact.IsRelayContact;
-        var isLan = contact.IsLanContact || System.Net.IPAddress.TryParse(contact.Address, out _);
+        var isLan = contact.IsLanContact;
 
-        var subtitle = isId
-            ? FormatId(contact.Address)
-            : !string.IsNullOrEmpty(contact.HardwareId)
-                ? $"GUID: {HardwareIdProvider.FormatDisplay(contact.HardwareId)}" +
-                  (string.IsNullOrEmpty(contact.LastKnownIp) ? "" : $" · {contact.LastKnownIp}")
-                : contact.LastKnownIp ?? contact.Address;
+        var subtitle = GetContactSubtitle(contact);
 
         var grid = new Grid { VerticalAlignment = VerticalAlignment.Center };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
@@ -773,29 +845,32 @@ public partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(4, 0, 0, 0)
         };
-        buttonsPanel.PreviewMouseLeftButtonDown += (_, e) => e.Handled = true;
 
         var capturedContact = contact;
 
         var starBtn = CreateContactActionButton(
             contact.IsFavorite ? "★" : "☆",
-            contact.IsFavorite ? "Favorilerden çıkar" : "Favorilere ekle",
+            contact.IsFavorite ? "Sık kullanılanlardan çıkar" : "Sık kullanılanlara ekle",
             fontSize: 14);
         starBtn.Foreground = contact.IsFavorite
             ? (Brush)FindResource("FavoriteBrush")
             : (Brush)FindResource("TextMutedBrush");
-        starBtn.Click += (_, _) =>
+        starBtn.Click += (_, e) =>
         {
+            e.Handled = true;
             capturedContact.IsFavorite = !capturedContact.IsFavorite;
             ConfigManager.Save(App.Config);
+            if (capturedContact.IsFavorite)
+                SetActiveContactTab(true);
             BuildContactsList();
         };
         buttonsPanel.Children.Add(starBtn);
 
         var editBtn = CreateContactActionButton("✏", "Adı değiştir");
         editBtn.Foreground = (Brush)FindResource("TextSecondaryBrush");
-        editBtn.Click += (_, _) =>
+        editBtn.Click += (_, e) =>
         {
+            e.Handled = true;
             var dlg = new EditContactDialog(capturedContact.DisplayName) { Owner = this };
             if (dlg.ShowDialog() == true)
             {
@@ -808,7 +883,11 @@ public partial class MainWindow : Window
 
         var deleteBtn = CreateContactActionButton("🗑", "Listeden kaldır");
         deleteBtn.Foreground = (Brush)FindResource("TextMutedBrush");
-        deleteBtn.Click += (_, _) => RemoveContact(capturedContact);
+        deleteBtn.Click += (_, e) =>
+        {
+            e.Handled = true;
+            RemoveContact(capturedContact);
+        };
         buttonsPanel.Children.Add(deleteBtn);
 
         Grid.SetColumn(buttonsPanel, 2);
@@ -829,18 +908,19 @@ public partial class MainWindow : Window
         border.MouseLeave += (_, _) =>
             border.Background = System.Windows.Media.Brushes.Transparent;
 
-        border.MouseLeftButtonDown += (_, _) =>
-        {
-            TxtTargetId.Text = GetContactConnectValue(contact);
-        };
-
         border.MouseLeftButtonDown += (_, e) =>
         {
+            if (IsFromContactAction(e.OriginalSource as DependencyObject))
+                return;
+
             if (e.ClickCount == 2)
             {
                 TxtTargetId.Text = GetContactConnectValue(contact);
                 BtnConnect_Click(border, new RoutedEventArgs());
+                return;
             }
+
+            TxtTargetId.Text = GetContactConnectValue(contact);
         };
 
         return border;
