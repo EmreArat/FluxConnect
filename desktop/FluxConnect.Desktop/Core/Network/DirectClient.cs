@@ -10,27 +10,25 @@ using System.Threading.Tasks;
 namespace FluxConnect.Desktop.Core.Network;
 
 /// <summary>
-/// LAN modunda, hedef bilgisayarın gömülü sunucusuna doğrudan bağlanan istemci.
-/// RelayClient'ın LAN karşılığı — Relay sunucusuna bağlanmak yerine
-/// doğrudan hedefin IP'sine WebSocket ile bağlanır.
+/// LAN modunda hedef bilgisayarın gömülü sunucusuna doğrudan bağlanan istemci.
 /// </summary>
 public class DirectClient : IDisposable
 {
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
     private bool _disposed;
-    // Aynı anda tek gönderim için kilit
-    private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly RelaySendPipeline _sendPipeline;
 
     public bool IsConnected => _ws?.State == WebSocketState.Open;
 
-    /// <summary>Sunucudan gelen mesaj (JSON)</summary>
-    public event Action<JsonNode>? OnMessageReceived;
+    public DirectClient()
+    {
+        _sendPipeline = new RelaySendPipeline(SendJsonDirectAsync, SendBinaryDirectAsync);
+    }
 
-    /// <summary>Bağlantı kesildi</summary>
+    public event Action<JsonNode>? OnMessageReceived;
     public event Action? OnDisconnected;
 
-    /// <summary>LAN üzerinden hedef bilgisayara doğrudan bağlan</summary>
     public async Task ConnectAsync(string ipAddress, int port = 9090)
     {
         _cts = new CancellationTokenSource();
@@ -46,7 +44,6 @@ public class DirectClient : IDisposable
             File.AppendAllText("flux_debug.txt",
                 $"[{DateTime.Now:HH:mm:ss}] [DirectClient] Bağlandı: {uri}\n");
 
-            // Alım döngüsünü başlat
             _ = Task.Run(() => ReceiveLoop(_cts.Token));
         }
         catch (Exception ex)
@@ -57,7 +54,6 @@ public class DirectClient : IDisposable
         }
     }
 
-    /// <summary>Bağlantı isteği gönder</summary>
     public async Task SendConnectionRequest(string displayName, string password, string hardwareId, string machineId)
     {
         var msg = new JsonObject
@@ -71,37 +67,50 @@ public class DirectClient : IDisposable
         await SendAsync(msg.ToJsonString());
     }
 
-    /// <summary>Relay verisi gönder (input komutları)</summary>
-    public async Task SendRelayDataAsync(string data)
+    public Task SendRelayDataAsync(string data)
     {
-        int timeout = 1000;
-        if (data.StartsWith("CAM:") || 
-            (!data.StartsWith("MIC:") && !data.StartsWith("SYS:") && !data.StartsWith("INP:") && !data.StartsWith("INF:") && !data.StartsWith("CMD:") && !data.StartsWith("FIL:") && !data.StartsWith("FS:")))
+        if (_ws?.State != WebSocketState.Open)
+            return Task.CompletedTask;
+
+        if (RelayFrameCodec.TryPackFromLegacy(data, out var frameBytes))
         {
-            timeout = 0; // Havadaki görüntü meşgulse bekleme, drop et!
+            var type = RelayFrameCodec.ClassifyLegacy(data) ?? RelayFrameType.LegacyText;
+            var wire = RelayWireCodec.PackLan(frameBytes);
+            _sendPipeline.EnqueueRelayWire(type, wire);
+            return Task.CompletedTask;
         }
-        else if (data.StartsWith("MIC:") || data.StartsWith("SYS:"))
-        {
-            timeout = 150; // Seste birikme olmasın
-        }
-        var msg = new JsonObject
-        {
-            ["type"] = "relay",
-            ["data"] = data
-        };
-        await SendAsync(msg.ToJsonString(), timeout);
+
+        var msg = new JsonObject { ["type"] = "relay", ["data"] = data };
+        _sendPipeline.EnqueueRelayPayload(data, msg.ToJsonString());
+        return Task.CompletedTask;
     }
 
-    public async Task SendAsync(string json, int timeoutMs = -1)
+    public Task SendRelayFrameAsync(RelayFrameType type, ReadOnlySpan<byte> payload)
+    {
+        if (_ws?.State != WebSocketState.Open)
+            return Task.CompletedTask;
+
+        var frameBytes = RelayFrameCodec.Pack(type, payload);
+        var wire = RelayWireCodec.PackLan(frameBytes);
+        _sendPipeline.EnqueueRelayWire(type, wire);
+        return Task.CompletedTask;
+    }
+
+    public Task SendAsync(string json, int timeoutMs = -1)
+    {
+        if (_ws?.State != WebSocketState.Open)
+            return Task.CompletedTask;
+
+        _sendPipeline.EnqueueRealtime(json);
+        return Task.CompletedTask;
+    }
+
+    private async Task SendJsonDirectAsync(string json)
     {
         if (_ws?.State != WebSocketState.Open) return;
 
-        bool acquired = await _sendLock.WaitAsync(timeoutMs);
-        if (!acquired) return; // Ağ meşgul, çerçeveyi (frame) at (drop)
-
         try
         {
-            if (_ws?.State != WebSocketState.Open) return;
             var bytes = Encoding.UTF8.GetBytes(json);
             await _ws.SendAsync(bytes, WebSocketMessageType.Text, true,
                 _cts?.Token ?? CancellationToken.None);
@@ -111,15 +120,27 @@ public class DirectClient : IDisposable
             File.AppendAllText("flux_debug.txt",
                 $"[{DateTime.Now:HH:mm:ss}] [DirectClient] Gönderme hatası: {ex.Message}\n");
         }
-        finally
+    }
+
+    private async Task SendBinaryDirectAsync(byte[] data)
+    {
+        if (_ws?.State != WebSocketState.Open) return;
+
+        try
         {
-            _sendLock.Release();
+            await _ws.SendAsync(data, WebSocketMessageType.Binary, true,
+                _cts?.Token ?? CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            File.AppendAllText("flux_debug.txt",
+                $"[{DateTime.Now:HH:mm:ss}] [DirectClient] Binary gönderme hatası: {ex.Message}\n");
         }
     }
 
     private async Task ReceiveLoop(CancellationToken ct)
     {
-        var buffer = new byte[1024 * 1024]; // 1MB
+        var buffer = new byte[1024 * 1024];
 
         try
         {
@@ -136,8 +157,20 @@ public class DirectClient : IDisposable
                 if (result.MessageType == WebSocketMessageType.Close)
                     break;
 
-                var text = Encoding.UTF8.GetString(ms.ToArray());
+                var messageBytes = ms.ToArray();
 
+                if (result.MessageType == WebSocketMessageType.Binary)
+                {
+                    if (RelayWireCodec.TryUnpackLan(messageBytes, out var frame))
+                    {
+                        var legacy = RelayFrameCodec.ToLegacyString(frame);
+                        var synthetic = new JsonObject { ["type"] = "relay", ["data"] = legacy };
+                        OnMessageReceived?.Invoke(synthetic);
+                    }
+                    continue;
+                }
+
+                var text = Encoding.UTF8.GetString(messageBytes);
                 try
                 {
                     var msg = JsonNode.Parse(text);
@@ -184,6 +217,6 @@ public class DirectClient : IDisposable
         _disposed = true;
         _cts?.Cancel();
         _ws?.Dispose();
-        _sendLock.Dispose();
+        _sendPipeline.Dispose();
     }
 }

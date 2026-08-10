@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
     <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260226" />
     <!-- Native DLL'ler ilk webcam kullanımında indirilir; publish'e dahil edilmez -->
     <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260226">

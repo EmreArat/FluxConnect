@@ -25,8 +25,7 @@ public class LocalServer : IDisposable
     private WebSocket? _activeClient;
     private readonly int _port;
     private bool _disposed;
-    // Aynı anda tek gönderim için kilit
-    private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly RelaySendPipeline _sendPipeline;
 
     public int Port => _port;
     public bool IsRunning => _cts != null && !_cts.IsCancellationRequested;
@@ -35,8 +34,10 @@ public class LocalServer : IDisposable
     /// <summary>Gelen bağlantı isteği: (peerName, password, hardwareId, machineId) → UI'a yönlendirilir</summary>
     public event Action<string, string, string, string>? OnConnectionRequest;
 
-    /// <summary>Gelen relay verisi (ekran/input): (data)</summary>
     public event Action<string>? OnDataReceived;
+
+    /// <summary>Decode edilmiş binary relay frame</summary>
+    public event Action<RelayFrame>? OnRelayFrameReceived;
 
     /// <summary>İstemci bağlantısı kesildi</summary>
     public event Action? OnClientDisconnected;
@@ -44,6 +45,7 @@ public class LocalServer : IDisposable
     public LocalServer(int port = 9090)
     {
         _port = port;
+        _sendPipeline = new RelaySendPipeline(SendJsonDirectAsync, SendBinaryDirectAsync);
     }
 
     public string GetLocalIpAddress()
@@ -153,6 +155,7 @@ public class LocalServer : IDisposable
         finally
         {
             tcpClient.Close();
+            _sendPipeline.ClearBulk();
             OnClientDisconnected?.Invoke();
         }
     }
@@ -176,7 +179,19 @@ public class LocalServer : IDisposable
                 if (result.MessageType == WebSocketMessageType.Close)
                     break;
 
-                var text = Encoding.UTF8.GetString(ms.ToArray());
+                var messageBytes = ms.ToArray();
+
+                if (result.MessageType == WebSocketMessageType.Binary)
+                {
+                    if (RelayWireCodec.TryUnpackLan(messageBytes, out var frame))
+                    {
+                        OnRelayFrameReceived?.Invoke(frame);
+                        OnDataReceived?.Invoke(RelayFrameCodec.ToLegacyString(frame));
+                    }
+                    continue;
+                }
+
+                var text = Encoding.UTF8.GetString(messageBytes);
                 HandleMessage(text);
             }
             catch (OperationCanceledException) { break; }
@@ -222,16 +237,22 @@ public class LocalServer : IDisposable
     }
 
     /// <summary>LAN istemcisine mesaj gönder</summary>
-    public async Task SendAsync(string json, int timeoutMs = -1)
+    public Task SendAsync(string json, int timeoutMs = -1)
     {
-        if (_activeClient?.State != WebSocketState.Open) return;
+        if (_activeClient?.State != WebSocketState.Open)
+            return Task.CompletedTask;
 
-        bool acquired = await _sendLock.WaitAsync(timeoutMs);
-        if (!acquired) return; // Ağ meşgul, çerçeveyi düşür.
+        _sendPipeline.EnqueueRealtime(json);
+        return Task.CompletedTask;
+    }
+
+    private async Task SendJsonDirectAsync(string json)
+    {
+        if (_activeClient?.State != WebSocketState.Open)
+            return;
 
         try
         {
-            if (_activeClient?.State != WebSocketState.Open) return;
             var bytes = Encoding.UTF8.GetBytes(json);
             await _activeClient.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
         }
@@ -240,9 +261,21 @@ public class LocalServer : IDisposable
             File.AppendAllText("flux_debug.txt",
                 $"[{DateTime.Now:HH:mm:ss}] [LocalServer] Gönderme hatası: {ex.Message}\n");
         }
-        finally
+    }
+
+    private async Task SendBinaryDirectAsync(byte[] data)
+    {
+        if (_activeClient?.State != WebSocketState.Open)
+            return;
+
+        try
         {
-            _sendLock.Release();
+            await _activeClient.SendAsync(data, WebSocketMessageType.Binary, true, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            File.AppendAllText("flux_debug.txt",
+                $"[{DateTime.Now:HH:mm:ss}] [LocalServer] Binary gönderme hatası: {ex.Message}\n");
         }
     }
 
@@ -260,24 +293,33 @@ public class LocalServer : IDisposable
     }
 
     /// <summary>Relay verisi gönder (ekran karesi)</summary>
-    public async Task SendRelayDataAsync(string data)
+    public Task SendRelayDataAsync(string data)
     {
-        int timeout = 1000;
-        if (data.StartsWith("CAM:") || 
-            (!data.StartsWith("MIC:") && !data.StartsWith("SYS:") && !data.StartsWith("INP:") && !data.StartsWith("INF:") && !data.StartsWith("CMD:") && !data.StartsWith("FIL:") && !data.StartsWith("FS:")))
+        if (_activeClient?.State != WebSocketState.Open)
+            return Task.CompletedTask;
+
+        if (RelayFrameCodec.TryPackFromLegacy(data, out var frameBytes))
         {
-            timeout = 0; // Havadaki görüntü meşgulse bekleme, drop et!
+            var type = RelayFrameCodec.ClassifyLegacy(data) ?? RelayFrameType.LegacyText;
+            var wire = RelayWireCodec.PackLan(frameBytes);
+            _sendPipeline.EnqueueRelayWire(type, wire);
+            return Task.CompletedTask;
         }
-        else if (data.StartsWith("MIC:") || data.StartsWith("SYS:"))
-        {
-            timeout = 150; // Ses paketlerinin ThreadPool kuyruğunda yığılıp gecikme yapmasını önle
-        }
-        var msg = new JsonObject
-        {
-            ["type"] = "relay",
-            ["data"] = data
-        };
-        await SendAsync(msg.ToJsonString(), timeout);
+
+        var msg = new JsonObject { ["type"] = "relay", ["data"] = data };
+        _sendPipeline.EnqueueRelayPayload(data, msg.ToJsonString());
+        return Task.CompletedTask;
+    }
+
+    public Task SendRelayFrameAsync(RelayFrameType type, ReadOnlySpan<byte> payload)
+    {
+        if (_activeClient?.State != WebSocketState.Open)
+            return Task.CompletedTask;
+
+        var frameBytes = RelayFrameCodec.Pack(type, payload);
+        var wire = RelayWireCodec.PackLan(frameBytes);
+        _sendPipeline.EnqueueRelayWire(type, wire);
+        return Task.CompletedTask;
     }
 
     // ---- HTTP / WebSocket Yardımcıları ----
@@ -320,6 +362,6 @@ public class LocalServer : IDisposable
         if (_disposed) return;
         _disposed = true;
         Stop();
-        _sendLock.Dispose();
+        _sendPipeline.Dispose();
     }
 }

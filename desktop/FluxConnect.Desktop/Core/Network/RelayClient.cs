@@ -13,21 +13,21 @@ public class RelayClient : IDisposable
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
     private bool _disposed;
-    // WebSocket aynı anda yalnızca bir SendAsync destekler — sıraya al
-    private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly RelaySendPipeline _sendPipeline;
 
-    // ---- Olaylar ----
     public event Action? OnConnected;
     public event Action? OnDisconnected;
     public event Action<string>? OnError;
     public event Action<JsonObject>? OnMessageReceived;
+    public event Action<string, string, RelayFrame>? OnRelayFrameReceived;
 
-    public bool IsConnected =>
-        _ws?.State == WebSocketState.Open;
+    public bool IsConnected => _ws?.State == WebSocketState.Open;
 
-    // ----------------------------------------------------------------
-    // Bağlan
-    // ----------------------------------------------------------------
+    public RelayClient()
+    {
+        _sendPipeline = new RelaySendPipeline(SendJsonDirectAsync, SendBinaryDirectAsync);
+    }
+
     public async Task ConnectAsync(string relayUrl, CancellationToken cancellationToken = default)
     {
         if (IsConnected) return;
@@ -41,107 +41,103 @@ public class RelayClient : IDisposable
             OnConnected?.Invoke();
             _ = ReceiveLoopAsync(_cts.Token);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            // Kullanıcıyı korkutmamak için standart soket hatası yerine daha dostça bir mesaj
-            OnError?.Invoke($"Sadece Yerel Ağ (LAN) Modu - İnternet Relay Sunucusuna ulaşılamadı.");
+            OnError?.Invoke("Sadece Yerel Ağ (LAN) Modu - İnternet Relay Sunucusuna ulaşılamadı.");
             throw;
         }
     }
 
-    // ----------------------------------------------------------------
-    // Mesaj Gönder
-    // ----------------------------------------------------------------
-    public async Task SendAsync(object message, int timeoutMs = -1, CancellationToken ct = default)
+    public Task SendAsync(object message, int timeoutMs = -1, CancellationToken ct = default)
     {
         if (_ws?.State != WebSocketState.Open)
-            return; // Hata fırlatmak yerine dönelim ki sürekli kare atan yerlerde kilitlenmesin.
+            return Task.CompletedTask;
 
         var json = JsonSerializer.Serialize(message);
-        var bytes = Encoding.UTF8.GetBytes(json);
-
-        // Frame düşürme mantığı (Eğer timeout 0 verildiyse ve meşgulse beklemeden çıkar)
-        bool acquired = await _sendLock.WaitAsync(timeoutMs, ct);
-        if (!acquired) return; // Ağ meşgul, önceki verinin gitmesini bekliyor, bu veriyi at (drop).
-
-        try
-        {
-            await _ws.SendAsync(
-                new ArraySegment<byte>(bytes),
-                WebSocketMessageType.Text,
-                endOfMessage: true,
-                ct);
-        }
-        catch (Exception ex)
-        {
-            System.IO.File.AppendAllText("flux_debug.txt",
-                $"[{DateTime.Now:HH:mm:ss}] [RelayClient] Gönderme hatası: {ex.Message}\n");
-        }
-        finally
-        {
-            _sendLock.Release();
-        }
+        _sendPipeline.EnqueueRealtime(json);
+        return Task.CompletedTask;
     }
 
-    // ----------------------------------------------------------------
-    // Kayıt ol
-    // ----------------------------------------------------------------
     public Task RegisterAsync(string machineId, string displayName, string hardwareId) =>
         SendAsync(new { type = "register", id = machineId, display_name = displayName, hardware_id = hardwareId });
 
-    // ----------------------------------------------------------------
-    // Bağlantı isteği gönder
-    // ----------------------------------------------------------------
     public Task RequestConnectAsync(string targetId) =>
         SendAsync(new { type = "connect_request", target_id = targetId });
 
-    // ----------------------------------------------------------------
-    // Bağlantı yanıtı gönder
-    // ----------------------------------------------------------------
     public Task RespondToConnectionAsync(string sessionId, bool accepted) =>
         SendAsync(new { type = "connect_response", session_id = sessionId, accepted });
 
-    // ----------------------------------------------------------------
-    // E2EE şifreli veri gönder
-    // ----------------------------------------------------------------
-    // Eğer webcam veya ekran karesi gibi yoğun bir veriyse, timeoutMs=0 verilir.
-    // Ses veya diğer veriler için timeout -1.
-    public async Task SendRelayDataAsync(string sessionId, string targetId, string data)
+    public Task SendRelayDataAsync(string sessionId, string targetId, string data)
     {
-        int timeout = 1000;
-        if (data.StartsWith("CAM:") || 
-            (!data.StartsWith("MIC:") && !data.StartsWith("SYS:") && !data.StartsWith("INP:") && !data.StartsWith("INF:") && !data.StartsWith("CMD:") && !data.StartsWith("FIL:") && !data.StartsWith("FS:")))
+        if (_ws?.State != WebSocketState.Open)
+            return Task.CompletedTask;
+
+        if (RelayFrameCodec.TryPackFromLegacy(data, out var frameBytes))
         {
-            timeout = 0; // Havadaki görüntü meşgulse bekleme, drop et!
+            var type = RelayFrameCodec.ClassifyLegacy(data) ?? RelayFrameType.LegacyText;
+            var wire = RelayWireCodec.PackInternet(sessionId, targetId, frameBytes);
+            _sendPipeline.EnqueueRelayWire(type, wire);
+            return Task.CompletedTask;
         }
-        else if (data.StartsWith("MIC:") || data.StartsWith("SYS:"))
-        {
-            timeout = 150; // Seste birikme olmasın
-        }
-        
-        await SendAsync(new { type = "relay", session_id = sessionId, target_id = targetId, data = data }, timeout);
+
+        var json = JsonSerializer.Serialize(new { type = "relay", session_id = sessionId, target_id = targetId, data });
+        _sendPipeline.EnqueueRealtime(json);
+        return Task.CompletedTask;
     }
 
-    // ----------------------------------------------------------------
-    // Ping
-    // ----------------------------------------------------------------
+    public Task SendRelayFrameAsync(string sessionId, string targetId, RelayFrameType type, ReadOnlySpan<byte> payload)
+    {
+        if (_ws?.State != WebSocketState.Open)
+            return Task.CompletedTask;
+
+        var frameBytes = RelayFrameCodec.Pack(type, payload);
+        var wire = RelayWireCodec.PackInternet(sessionId, targetId, frameBytes);
+        _sendPipeline.EnqueueRelayWire(type, wire);
+        return Task.CompletedTask;
+    }
+
     public Task PingAsync() => SendAsync(new { type = "ping" });
 
-    // ----------------------------------------------------------------
-    // Presence (Çevrimiçi Durum Takibi)
-    // ----------------------------------------------------------------
     public Task SubscribePresenceAsync(string[] ids) =>
         SendAsync(new { type = "presence_subscribe", ids });
 
     public Task QueryPresenceAsync(string[] ids) =>
         SendAsync(new { type = "presence_query", ids });
 
-    // ----------------------------------------------------------------
-    // Alma döngüsü
-    // ----------------------------------------------------------------
+    private async Task SendJsonDirectAsync(string json)
+    {
+        if (_ws?.State != WebSocketState.Open) return;
+
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(json);
+            await _ws.SendAsync(bytes, WebSocketMessageType.Text, true, _cts?.Token ?? CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            System.IO.File.AppendAllText("flux_debug.txt",
+                $"[{DateTime.Now:HH:mm:ss}] [RelayClient] JSON gönderme hatası: {ex.Message}\n");
+        }
+    }
+
+    private async Task SendBinaryDirectAsync(byte[] data)
+    {
+        if (_ws?.State != WebSocketState.Open) return;
+
+        try
+        {
+            await _ws.SendAsync(data, WebSocketMessageType.Binary, true, _cts?.Token ?? CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            System.IO.File.AppendAllText("flux_debug.txt",
+                $"[{DateTime.Now:HH:mm:ss}] [RelayClient] Binary gönderme hatası: {ex.Message}\n");
+        }
+    }
+
     private async Task ReceiveLoopAsync(CancellationToken ct)
     {
-        var buffer = new byte[1024 * 1024]; // 1 MB tampon boyutu (Ekran görüntüleri için büyük olmalı)
+        var buffer = new byte[1024 * 1024];
 
         try
         {
@@ -162,29 +158,29 @@ public class RelayClient : IDisposable
                     ms.Write(buffer, 0, result.Count);
                 } while (!result.EndOfMessage);
 
-                // Tek bir tam mesaj ms içinde birikti
-                var jsonBytes = ms.ToArray();
-                if (jsonBytes.Length == 0) continue;
+                var messageBytes = ms.ToArray();
+                if (messageBytes.Length == 0) continue;
 
-                var json = Encoding.UTF8.GetString(jsonBytes);
+                if (result.MessageType == WebSocketMessageType.Binary)
+                {
+                    if (RelayWireCodec.TryUnpackInternet(messageBytes, out var sessionId, out var fromId, out var frame))
+                        OnRelayFrameReceived?.Invoke(sessionId, fromId, frame);
+                    continue;
+                }
+
+                var json = Encoding.UTF8.GetString(messageBytes);
                 try
                 {
-                    var node = JsonNode.Parse(json);
-                    if (node is JsonObject obj)
-                    {
+                    if (JsonNode.Parse(json) is JsonObject obj)
                         OnMessageReceived?.Invoke(obj);
-                    }
                 }
                 catch (Exception parseEx)
                 {
-                    OnError?.Invoke($"JSON Parse hatası ({jsonBytes.Length} byte): {parseEx.Message}");
+                    OnError?.Invoke($"JSON Parse hatası ({messageBytes.Length} byte): {parseEx.Message}");
                 }
             }
         }
-        catch (OperationCanceledException)
-        {
-            // Beklenen iptal
-        }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             OnError?.Invoke($"Alma döngüsü hatası: {ex.Message}");
@@ -195,9 +191,6 @@ public class RelayClient : IDisposable
         }
     }
 
-    // ----------------------------------------------------------------
-    // Bağlantıyı kes
-    // ----------------------------------------------------------------
     public async Task DisconnectAsync()
     {
         _cts?.Cancel();
@@ -205,12 +198,9 @@ public class RelayClient : IDisposable
         {
             try
             {
-                await _ws.CloseAsync(
-                    WebSocketCloseStatus.NormalClosure,
-                    "Kullanıcı kapattı",
-                    CancellationToken.None);
+                await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Kullanıcı kapattı", CancellationToken.None);
             }
-            catch { /* Sessizce kapat */ }
+            catch { }
         }
     }
 
@@ -221,6 +211,6 @@ public class RelayClient : IDisposable
         _cts?.Cancel();
         _cts?.Dispose();
         _ws?.Dispose();
-        _sendLock.Dispose();
+        _sendPipeline.Dispose();
     }
 }

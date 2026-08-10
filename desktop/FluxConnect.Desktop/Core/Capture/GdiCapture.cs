@@ -123,7 +123,7 @@ public class GdiCapture : IDisposable
 
         using var ms = new MemoryStream();
         var jpegParams = new EncoderParameters(1);
-        jpegParams.Param[0] = new EncoderParameter(Encoder.Quality, 60L);
+        jpegParams.Param[0] = new EncoderParameter(Encoder.Quality, (long)App.StreamQuality.Snapshot().JpegQuality);
         var jpegCodec = GetJpegCodec();
         if (jpegCodec == null) return;
 

@@ -216,6 +216,13 @@ export class Hub {
         return true;
     }
 
+    sendBinaryToClient(clientId: string, payload: Buffer): boolean {
+        const client = this.clients.get(clientId);
+        if (!client || client.ws.readyState !== WebSocket.OPEN) return false;
+        client.ws.send(payload);
+        return true;
+    }
+
     // ----------------------------------------------------------------
     // İstatistik
     // ----------------------------------------------------------------

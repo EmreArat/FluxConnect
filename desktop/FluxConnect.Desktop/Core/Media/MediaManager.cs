@@ -12,8 +12,9 @@ public class MediaManager : IDisposable
     private SystemAudioCapture? _sysAudio;
     private WebcamCapture? _webcam;
 
-    private AudioPlayer? _micPlayer;     // Karşıdan gelen mikrofon sesini çalar
-    private AudioPlayer? _sysAudioPlayer; // Karşıdan gelen sistem sesini çalar
+    private AudioPlayer? _micPlayer;
+    private AudioPlayer? _sysAudioPlayer;
+    private readonly object _audioPlayerLock = new();
 
     /// <summary>Relay/LAN'a gönderilecek veri (prefix, base64data)</summary>
     public event Action<string, string>? OnMediaData;
@@ -99,22 +100,33 @@ public class MediaManager : IDisposable
     /// </summary>
     public void HandleIncomingMedia(string prefixedData)
     {
+        if (prefixedData.StartsWith("MIC:") || prefixedData.StartsWith("SYS:"))
+        {
+            _ = Task.Run(() => ProcessIncomingAudio(prefixedData));
+            return;
+        }
+
+        if (prefixedData.StartsWith("CAM:"))
+            OnRemoteWebcamFrame?.Invoke(prefixedData[4..]);
+    }
+
+    private void ProcessIncomingAudio(string prefixedData)
+    {
         if (prefixedData.StartsWith("MIC:"))
         {
-            // Karşıdan gelen mikrofon sesi → hoparlörde çal
-            _micPlayer ??= CreateAndStartPlayer();
-            _micPlayer.Feed(prefixedData[4..]);
+            lock (_audioPlayerLock)
+            {
+                _micPlayer ??= CreateAndStartPlayer();
+                _micPlayer.Feed(prefixedData[4..]);
+            }
         }
         else if (prefixedData.StartsWith("SYS:"))
         {
-            // Karşıdan gelen sistem sesi → hoparlörde çal
-            _sysAudioPlayer ??= CreateAndStartPlayer();
-            _sysAudioPlayer.Feed(prefixedData[4..]);
-        }
-        else if (prefixedData.StartsWith("CAM:"))
-        {
-            // Karşıdan gelen webcam karesi → UI'a bildir
-            OnRemoteWebcamFrame?.Invoke(prefixedData[4..]);
+            lock (_audioPlayerLock)
+            {
+                _sysAudioPlayer ??= CreateAndStartPlayer();
+                _sysAudioPlayer.Feed(prefixedData[4..]);
+            }
         }
     }
 

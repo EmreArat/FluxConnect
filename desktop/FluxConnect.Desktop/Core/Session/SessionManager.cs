@@ -68,6 +68,25 @@ public class SessionManager : IDisposable
         _relay.OnDisconnected += () => OnRelayDisconnected?.Invoke();
         _relay.OnError += msg => OnRelayError?.Invoke(msg);
         _relay.OnMessageReceived += HandleMessage;
+        _relay.OnRelayFrameReceived += HandleRelayFrame;
+    }
+
+    private void HandleRelayFrame(string sessionId, string fromId, RelayFrame frame)
+    {
+        var data = RelayFrameCodec.ToLegacyString(frame);
+
+        if (data == "CMD:END_SESSION")
+        {
+            StopScreenSender();
+            CurrentSession = null;
+            OnSessionRejected?.Invoke(sessionId, "Karşı taraf bağlantıyı sonlandırdı.");
+            return;
+        }
+
+        if (CurrentSession?.Role == SessionRole.Target && data.StartsWith("INP:"))
+            InputReceiver.Handle(data[4..]);
+
+        OnRelayData?.Invoke(sessionId, data);
     }
 
     /// <summary>Config'deki kişilerin ID'lerine presence aboneliği başlat</summary>

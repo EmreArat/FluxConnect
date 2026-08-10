@@ -39,9 +39,16 @@ export class ClientHandler {
     }
 
     private onMessage(raw: WebSocket.RawData): void {
+        const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer);
+
+        if (buf.length >= 2 && buf[0] === 0xFC && buf[1] === 0x02) {
+            this.handleBinaryRelay(buf);
+            return;
+        }
+
         let msg: ClientToServerMessage;
         try {
-            msg = JSON.parse(raw.toString()) as ClientToServerMessage;
+            msg = JSON.parse(buf.toString('utf8')) as ClientToServerMessage;
         } catch {
             this.send({ type: 'error', code: 'INVALID_JSON', message: 'Geçersiz mesaj formatı.' });
             return;
@@ -219,6 +226,58 @@ export class ClientHandler {
     // ----------------------------------------------------------------
     // E2EE Veri Röleleme
     // ----------------------------------------------------------------
+    private handleBinaryRelay(buf: Buffer): void {
+        if (!this.clientId) return;
+
+        let offset = 2;
+        if (buf.length < offset + 4) return;
+
+        const sessionLen = buf.readUInt16LE(offset);
+        offset += 2;
+        if (buf.length < offset + sessionLen + 2) return;
+
+        const sessionId = buf.subarray(offset, offset + sessionLen).toString('utf8');
+        offset += sessionLen;
+
+        const peerLen = buf.readUInt16LE(offset);
+        offset += 2;
+        if (buf.length < offset + peerLen) return;
+
+        offset += peerLen; // target_id (client→server) — routing oturumdan yapılır
+        const framePayload = buf.subarray(offset);
+
+        const session = this.hub.getSession(sessionId);
+        if (!session || session.state !== 'active') return;
+
+        if (session.requesterId !== this.clientId && session.targetId !== this.clientId) {
+            this.send({ type: 'error', code: 'UNAUTHORIZED', message: 'Bu oturuma erişim yetkiniz yok.' });
+            return;
+        }
+
+        const actualTargetId = session.requesterId === this.clientId
+            ? session.targetId
+            : session.requesterId;
+
+        const sessionStart = 4;
+        const sessionIdSlice = buf.subarray(sessionStart, sessionStart + sessionLen);
+        const fromIdBytes = Buffer.from(this.clientId, 'utf8');
+        const out = Buffer.alloc(2 + 2 + sessionLen + 2 + fromIdBytes.length + framePayload.length);
+        let o = 0;
+        out[o++] = 0xFC;
+        out[o++] = 0x02;
+        out.writeUInt16LE(sessionLen, o);
+        o += 2;
+        sessionIdSlice.copy(out, o);
+        o += sessionLen;
+        out.writeUInt16LE(fromIdBytes.length, o);
+        o += 2;
+        fromIdBytes.copy(out, o);
+        o += fromIdBytes.length;
+        framePayload.copy(out, o);
+
+        this.hub.sendBinaryToClient(actualTargetId, out);
+    }
+
     private handleRelay(sessionId: string, targetId: string, data: string): void {
         if (!this.clientId) return;
 

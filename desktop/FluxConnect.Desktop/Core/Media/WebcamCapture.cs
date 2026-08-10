@@ -1,21 +1,19 @@
+using FluxConnect.Desktop.Core.Capture;
 using OpenCvSharp;
 
 namespace FluxConnect.Desktop.Core.Media;
 
 /// <summary>
-/// OpenCvSharp4 ile webcam görüntüsünü yakalar.
-/// Yakalanan kare JPEG+Base64 olarak OnFrameChunk ile dışarıya verilir.
+/// Webcam görüntüsünü yakalar ve JPEG olarak dışarı verir.
 /// </summary>
 public class WebcamCapture : IDisposable
 {
     private VideoCapture? _capture;
     private CancellationTokenSource? _cts;
     private bool _isCapturing;
-    private const int Fps = 8;
+    private const int BaseFps = 8;
 
-    /// <summary>JPEG Base64 kare verisi</summary>
     public event Action<string>? OnFrameChunk;
-
     public bool IsCapturing => _isCapturing;
 
     public void Start(int cameraIndex = 0)
@@ -30,7 +28,6 @@ public class WebcamCapture : IDisposable
             throw new InvalidOperationException("Webcam açılamadı.");
         }
 
-        // Düşük çözünürlük — bant genişliği tasarrufu
         _capture.Set(VideoCaptureProperties.FrameWidth, 320);
         _capture.Set(VideoCaptureProperties.FrameHeight, 240);
 
@@ -48,25 +45,24 @@ public class WebcamCapture : IDisposable
 
     private async Task CaptureLoopAsync(CancellationToken ct)
     {
-        var intervalMs = 1000 / Fps;
         using var mat = new Mat();
 
         try
         {
             while (!ct.IsCancellationRequested && _capture != null && _capture.IsOpened())
             {
+                var webcamQuality = App.StreamQuality.Snapshot().WebcamQuality;
+                var intervalMs = Math.Max(1000 / BaseFps, App.StreamQuality.GetMinFrameIntervalMs());
+
                 if (_capture.Read(mat) && !mat.Empty())
                 {
                     try
                     {
-                        // JPEG olarak encode et (Daha fazla sıkıştırma, ağ optimizasyonu)
                         Cv2.ImEncode(".jpg", mat, out var buf,
-                            new ImageEncodingParam(ImwriteFlags.JpegQuality, 35));
-
-                        var base64 = Convert.ToBase64String(buf);
-                        OnFrameChunk?.Invoke(base64);
+                            new ImageEncodingParam(ImwriteFlags.JpegQuality, webcamQuality));
+                        OnFrameChunk?.Invoke(Convert.ToBase64String(buf));
                     }
-                    catch { /* Sessizce geç */ }
+                    catch { }
                 }
 
                 await Task.Delay(intervalMs, ct);

@@ -2,6 +2,7 @@
 using FluxConnect.Desktop.Core.Config;
 using FluxConnect.Desktop.Core.Network;
 using FluxConnect.Desktop.Core.Session;
+using FluxConnect.Desktop.Core.Capture;
 // WinForms + WPF birlikte kullanıldığında çakışmayı gidermek için alias
 using Application = System.Windows.Application;
 using StartupEventArgs = System.Windows.StartupEventArgs;
@@ -16,6 +17,7 @@ public partial class App : Application
     public static SessionManager Session { get; private set; } = null!;
     public static LocalServer LanServer { get; private set; } = null!;
     public static LanDiscoveryHost LanDiscovery { get; private set; } = null!;
+    public static StreamQualityController StreamQuality { get; } = new();
 
     protected override void OnStartup(StartupEventArgs e)
     {

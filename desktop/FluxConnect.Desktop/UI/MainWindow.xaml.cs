@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private FloatingTransferWindow? _targetTransferWindow;
     private string? _pendingHardwareConnect;
     private bool _showFavoritesTab;
+    private int _isProcessingTargetWebcam;
 
     public MainWindow()
     {
@@ -177,42 +178,40 @@ public partial class MainWindow : Window
             });
 
         _session.OnRelayData += (sessionId, data) =>
-            Dispatcher.Invoke(() =>
+        {
+            if (_session.CurrentSession?.Role != SessionRole.Target ||
+                _session.CurrentSession.SessionId != sessionId)
+                return;
+
+            if (data.StartsWith("MIC:") || data.StartsWith("SYS:") || data.StartsWith("CAM:"))
             {
-                // Sadece Target (ev sahibi) rolündeyken gelen medya verilerini işle.
-                // Requester rolündeyken gelen veriler ViewerWindow tarafından işleniyor.
-                if (_session.CurrentSession?.Role == SessionRole.Target &&
-                    _session.CurrentSession.SessionId == sessionId)
+                _targetMedia?.HandleIncomingMedia(data);
+                return;
+            }
+
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (data == "CMD:OFF_CAM")
                 {
-                    if (data == "CMD:OFF_CAM")
-                    {
-                        _targetMedia?.StopWebcam();
-                        UpdateButtonState(BtnTargetWebcam, false, "Webcam (Açık)", "Webcam (Kapalı)");
-                        if (_floatingWebcam?.IsVisible == true)
-                        {
-                            _floatingWebcam.Hide();
-                        }
-                        return;
-                    }
+                    _targetMedia?.StopWebcam();
+                    UpdateButtonState(BtnTargetWebcam, false, "Webcam (Açık)", "Webcam (Kapalı)");
+                    if (_floatingWebcam?.IsVisible == true)
+                        _floatingWebcam.Hide();
+                    return;
+                }
 
-                    if (data.StartsWith("FS:"))
-                    {
-                        _targetFsManager?.HandleIncomingCommand(data);
-                        return;
-                    }
+                if (data.StartsWith("FS:"))
+                {
+                    _targetFsManager?.HandleIncomingCommand(data);
+                    return;
+                }
 
-                    if (data.StartsWith("FIL:"))
-                    {
-                        _targetFileManager?.HandleIncomingMessage(data);
-                        return;
-                    }
-
-                    if (data.StartsWith("MIC:") || data.StartsWith("SYS:") || data.StartsWith("CAM:"))
-                    {
-                        _targetMedia?.HandleIncomingMedia(data);
-                    }
+                if (data.StartsWith("FIL:"))
+                {
+                    _targetFileManager?.HandleIncomingMessage(data);
                 }
             });
+        };
 
         _session.OnPresenceUpdate += (id, online, displayName) =>
             Dispatcher.Invoke(() =>
@@ -301,7 +300,10 @@ public partial class MainWindow : Window
 
             _targetMedia.OnRemoteWebcamFrame += (base64Jpeg) =>
             {
-                Dispatcher.Invoke(() =>
+                if (System.Threading.Interlocked.CompareExchange(ref _isProcessingTargetWebcam, 1, 0) == 1)
+                    return;
+
+                Dispatcher.BeginInvoke(() =>
                 {
                     try
                     {
@@ -314,7 +316,6 @@ public partial class MainWindow : Window
                         bmp.EndInit();
                         bmp.Freeze();
 
-                        // İlk kare gelince floating window'u göster
                         if (_floatingWebcam != null)
                         {
                             if (!_floatingWebcam.IsVisible)
@@ -323,6 +324,10 @@ public partial class MainWindow : Window
                         }
                     }
                     catch { }
+                    finally
+                    {
+                        System.Threading.Interlocked.Exchange(ref _isProcessingTargetWebcam, 0);
+                    }
                 });
             };
 
