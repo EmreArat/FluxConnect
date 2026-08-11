@@ -4,6 +4,7 @@ using FluxConnect.Desktop.Core.Network;
 using FluxConnect.Desktop.Core.Capture;
 using FluxConnect.Desktop.Core.Input; // Giriş komutları için
 using FluxConnect.Desktop.Core.Hardware;
+using FluxConnect.Desktop.Core.Security;
 
 namespace FluxConnect.Desktop.Core.Session;
 
@@ -52,7 +53,15 @@ public class SessionManager : IDisposable
     /// <summary>Çevrimiçi durum değişikliği (id, online, displayName)</summary>
     public event Action<string, bool, string?>? OnPresenceUpdate;
 
+    /// <summary>İstek gönderildi — (sessionId, targetHasPassword)</summary>
+    public event Action<string, bool>? OnConnectPending;
+
+    /// <summary>Şifre doğrulama sonucu — (sessionId, success)</summary>
+    public event Action<string, bool>? OnPasswordResult;
+
     public ActiveSession? CurrentSession { get; private set; }
+
+    private readonly Dictionary<string, (string FromId, string FromName)> _pendingIncoming = new();
 
     public SessionManager(RelayClient relay, AppConfig config)
     {
@@ -155,25 +164,17 @@ public class SessionManager : IDisposable
     /// <summary>LAN sunucusu event'lerini bağlar (App.xaml.cs'den çağrılır)</summary>
     public void BindLanServer(LocalServer server)
     {
-        server.OnConnectionRequest += (peerName, password, _, _) =>
+        server.OnConnectionRequest += (peerName, _, _, _) =>
         {
-            // Şifre kontrolü
-            if (!string.IsNullOrEmpty(_config.SessionPasswordHash) && 
-                !string.IsNullOrEmpty(password))
-            {
-                // Gelen şifreyi hash'leyip karşılaştır
-                var hash = Convert.ToHexString(
-                    System.Security.Cryptography.SHA256.HashData(
-                        System.Text.Encoding.UTF8.GetBytes(password))).ToLower();
-                if (hash != _config.SessionPasswordHash)
-                {
-                    _ = server.RespondToConnection(false, _config.DisplayName, _config.HardwareId, _config.MachineId);
-                    return;
-                }
-            }
+            _pendingIncoming["lan_session"] = ("LAN", peerName);
+            var hasPassword = !string.IsNullOrEmpty(_config.SessionPasswordHash);
+            OnIncomingRequest?.Invoke("LAN", peerName, "lan_session", hasPassword);
+        };
 
-            // UI'a bağlantı isteği bildir (fromId olarak "LAN" kullanıyoruz)
-            OnIncomingRequest?.Invoke("LAN", peerName, "lan_session", false);
+        server.OnPasswordAttempt += async (passwordHash) =>
+        {
+            if (PasswordHelper.VerifyHash(passwordHash, _config.SessionPasswordHash))
+                await AcceptLanWithPasswordAsync();
         };
 
         server.OnClientDisconnected += () =>
@@ -256,8 +257,32 @@ public class SessionManager : IDisposable
     public async Task StartAsync()
     {
         await _relay.ConnectAsync(_config.RelayUrl);
-        await _relay.RegisterAsync(_config.MachineId, _config.DisplayName, _config.HardwareId);
+        await RegisterOnRelayAsync();
     }
+
+    public async Task RefreshRegistrationAsync()
+    {
+        if (_relay.IsConnected)
+            await RegisterOnRelayAsync();
+    }
+
+    private Task RegisterOnRelayAsync()
+    {
+        var hasPassword = !string.IsNullOrEmpty(_config.SessionPasswordHash);
+        return _relay.RegisterAsync(_config.MachineId, _config.DisplayName, _config.HardwareId, hasPassword);
+    }
+
+    public Task SendPasswordAttemptAsync(string sessionId, string passwordHash) =>
+        _relay.SendPasswordAttemptAsync(sessionId, passwordHash);
+
+    public Task SendPasswordVerifyResultAsync(string sessionId, bool success) =>
+        _relay.SendPasswordVerifyResultAsync(sessionId, success);
+
+    public async Task SendLanPasswordAttemptAsync(DirectClient client, string passwordHash) =>
+        await client.SendPasswordAttemptAsync(passwordHash);
+
+    public bool TryVerifySessionPassword(string? passwordHash) =>
+        PasswordHelper.VerifyHash(passwordHash, _config.SessionPasswordHash);
 
     public Task SubscribePresenceAsync(string[] ids)
     {
@@ -378,7 +403,24 @@ public class SessionManager : IDisposable
                 var fromName = msg["from_display_name"]?.GetValue<string>() ?? "";
                 var sessionId = msg["session_id"]?.GetValue<string>() ?? "";
                 var requiresPassword = msg["requires_password"]?.GetValue<bool>() ?? false;
+                _pendingIncoming[sessionId] = (fromId, fromName);
                 OnIncomingRequest?.Invoke(fromId, fromName, sessionId, requiresPassword);
+                break;
+            }
+
+            case "connect_pending":
+            {
+                var sessionId = msg["session_id"]?.GetValue<string>() ?? "";
+                var targetHasPassword = msg["target_has_password"]?.GetValue<bool>() ?? false;
+                OnConnectPending?.Invoke(sessionId, targetHasPassword);
+                break;
+            }
+
+            case "password_result":
+            {
+                var sessionId = msg["session_id"]?.GetValue<string>() ?? "";
+                var success = msg["success"]?.GetValue<bool>() ?? false;
+                OnPasswordResult?.Invoke(sessionId, success);
                 break;
             }
 
@@ -426,7 +468,11 @@ public class SessionManager : IDisposable
             case "relay":
             {
                 var sessionId = msg["session_id"]?.GetValue<string>() ?? "";
+                var fromId = msg["from_id"]?.GetValue<string>() ?? "";
                 var data = msg["data"]?.GetValue<string>() ?? "";
+
+                if (TryHandlePasswordCheckRelay(sessionId, fromId, data))
+                    break;
                 
                 // Karşı taraf bağlantıyı kestiyse
                 if (data == "CMD:END_SESSION")
@@ -487,6 +533,41 @@ public class SessionManager : IDisposable
                 break;
             }
         }
+    }
+
+    private async Task AcceptLanWithPasswordAsync()
+    {
+        if (CurrentSession?.Role == SessionRole.Target)
+            return;
+        await LanAcceptAsync();
+    }
+
+    private bool TryHandlePasswordCheckRelay(string sessionId, string fromId, string data)
+    {
+        if (!data.StartsWith('{')) return false;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(data);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("__internal", out var internalProp) &&
+                internalProp.GetString() == "password_check" &&
+                root.TryGetProperty("hash", out var hashProp))
+            {
+                var hash = hashProp.GetString();
+                if (PasswordHelper.VerifyHash(hash, _config.SessionPasswordHash))
+                {
+                    var fromName = _pendingIncoming.TryGetValue(sessionId, out var p) ? p.FromName : fromId;
+                    _ = AcceptAsync(sessionId, fromId, fromName);
+                }
+                else
+                {
+                    _ = SendPasswordVerifyResultAsync(sessionId, false);
+                }
+                return true;
+            }
+        }
+        catch { }
+        return false;
     }
 
     private void StopScreenSender()

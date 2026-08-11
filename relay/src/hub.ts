@@ -10,6 +10,7 @@ export interface ConnectedClient {
     id: string;
     displayName: string;
     hardwareId?: string;
+    hasSessionPassword: boolean;
     ws: WebSocket;
     registeredAt: Date;
     ipAddress: string;
@@ -34,7 +35,7 @@ export class Hub {
     // İstemci Yönetimi
     // ----------------------------------------------------------------
 
-    register(id: string, displayName: string, ws: WebSocket, ip: string, hardwareId?: string): boolean {
+    register(id: string, displayName: string, ws: WebSocket, ip: string, hardwareId?: string, hasSessionPassword = false): boolean {
         if (this.clients.has(id)) {
             // ID zaten kayıtlıysa reddet
             return false;
@@ -44,6 +45,7 @@ export class Hub {
             id,
             displayName,
             hardwareId: normalizedHw,
+            hasSessionPassword,
             ws,
             registeredAt: new Date(),
             ipAddress: ip,

@@ -4,7 +4,7 @@ using System.Windows.Input;
 
 namespace FluxConnect.Desktop.UI.Controls;
 
-public partial class WindowTitleBar : UserControl
+public partial class WindowTitleBar : System.Windows.Controls.UserControl
 {
     public static readonly DependencyProperty TitleProperty =
         DependencyProperty.Register(nameof(Title), typeof(string), typeof(WindowTitleBar),

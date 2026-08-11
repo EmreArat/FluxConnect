@@ -1,0 +1,52 @@
+---
+description: FluxConnect desktop publish komutu ve çıktı standardı
+alwaysApply: true
+---
+
+# FluxConnect Publish Standardı
+
+Kullanıcı "publish oluştur" dediğinde veya güncel exe istediğinde **her zaman** aşağıdaki akışı uygula.
+
+## Komut
+
+Proje kökünden veya mutlak yolla:
+
+```powershell
+dotnet publish "desktop/FluxConnect.Desktop/FluxConnect.Desktop.csproj" `
+  -c Release `
+  -r win-x64 `
+  --self-contained false `
+  -p:PublishSingleFile=true `
+  -p:EnableCompressionInSingleFile=false `
+  -p:DebugType=None `
+  -p:IncludeNativeLibrariesForSelfExtract=false `
+  -o "desktop/FluxConnect.Desktop/publish_output"
+
+Remove-Item "desktop/FluxConnect.Desktop/publish_output/*.dll" -Force -ErrorAction SilentlyContinue
+Remove-Item "desktop/FluxConnect.Desktop/publish_output/*.pdb" -Force -ErrorAction SilentlyContinue
+```
+
+## Beklenen çıktı
+
+- **Tek dosya:** `desktop/FluxConnect.Desktop/publish_output/FluxConnect.exe` (~3,3 MB)
+- Yanında **OpenCV DLL olmamalı** (webcam ilk kullanımda NuGet'ten indirilir)
+- `flux_debug.txt` commit/publish paketine dahil edilmez; varsa yoksay
+
+## Özellikler
+
+| Ayar | Değer | Neden |
+|------|-------|-------|
+| `win-x64` | RID | 64-bit Windows |
+| `--self-contained false` | Framework-dependent | Küçük exe; hedefte .NET 9 Desktop Runtime gerekir |
+| `PublishSingleFile=true` | Tek exe | Dağıtım kolaylığı |
+| `EnableCompressionInSingleFile=false` | Sıkıştırma kapalı | Framework-dependent ile uyumlu |
+| `IncludeNativeLibrariesForSelfExtract=false` | Native gömülmez | OpenCV lazy download ile ayrı indirilir |
+
+## Hata durumları
+
+- **Exe kilitli:** FluxConnect çalışıyorsa kapat, tekrar publish al
+- **Yanlışlıkla DLL/pdb oluşursa:** Yukarıdaki `Remove-Item` adımlarını uygula
+
+## Commit
+
+`publish_output/` `.gitignore` içinde — publish çıktısını commit etme.

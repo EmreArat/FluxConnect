@@ -58,14 +58,20 @@ public class RelayClient : IDisposable
         return Task.CompletedTask;
     }
 
-    public Task RegisterAsync(string machineId, string displayName, string hardwareId) =>
-        SendAsync(new { type = "register", id = machineId, display_name = displayName, hardware_id = hardwareId });
+    public Task RegisterAsync(string machineId, string displayName, string hardwareId, bool hasSessionPassword) =>
+        SendAsync(new { type = "register", id = machineId, display_name = displayName, hardware_id = hardwareId, has_session_password = hasSessionPassword });
 
     public Task RequestConnectAsync(string targetId) =>
         SendAsync(new { type = "connect_request", target_id = targetId });
 
     public Task RespondToConnectionAsync(string sessionId, bool accepted) =>
         SendAsync(new { type = "connect_response", session_id = sessionId, accepted });
+
+    public Task SendPasswordAttemptAsync(string sessionId, string passwordHash) =>
+        SendAsync(new { type = "password_attempt", session_id = sessionId, password_hash = passwordHash });
+
+    public Task SendPasswordVerifyResultAsync(string sessionId, bool success) =>
+        SendAsync(new { type = "password_verify_result", session_id = sessionId, success });
 
     public Task SendRelayDataAsync(string sessionId, string targetId, string data)
     {

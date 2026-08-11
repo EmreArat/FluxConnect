@@ -54,17 +54,27 @@ public class DirectClient : IDisposable
         }
     }
 
-    public async Task SendConnectionRequest(string displayName, string password, string hardwareId, string machineId)
+    public async Task SendConnectionRequest(string displayName, string passwordHash, string hardwareId, string machineId)
     {
         var msg = new JsonObject
         {
             ["type"] = "connect_request",
             ["display_name"] = displayName,
-            ["password"] = password,
+            ["password_hash"] = passwordHash,
             ["hardware_id"] = hardwareId,
             ["machine_id"] = machineId
         };
         await SendAsync(msg.ToJsonString());
+    }
+
+    public Task SendPasswordAttemptAsync(string passwordHash)
+    {
+        var msg = new JsonObject
+        {
+            ["type"] = "password_attempt",
+            ["password_hash"] = passwordHash
+        };
+        return SendAsync(msg.ToJsonString());
     }
 
     public Task SendRelayDataAsync(string data)

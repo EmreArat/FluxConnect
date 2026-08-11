@@ -4,8 +4,6 @@ namespace FluxConnect.Desktop.UI.Dialogs;
 
 public partial class AcceptConnectionDialog : Window
 {
-    private readonly string _sessionId;
-
     public AcceptConnectionDialog(
         string fromId,
         string fromDisplayName,
@@ -14,21 +12,12 @@ public partial class AcceptConnectionDialog : Window
     {
         InitializeComponent();
 
-        _sessionId = sessionId;
-
         TxtFromName.Text = fromDisplayName;
-        TxtFromId.Text = $"ID: {FormatId(fromId)}";
+        TxtFromId.Text = fromId == "LAN" ? "Yerel Ağ" : $"ID: {FormatId(fromId)}";
 
         if (requiresPassword)
         {
             PasswordPanel.Visibility = Visibility.Visible;
-        }
-
-        // Otomatik kabul ayarı kontrolü
-        if (App.Config.AutoAccept)
-        {
-            DialogResult = true;
-            Close();
         }
     }
 

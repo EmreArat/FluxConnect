@@ -9,6 +9,19 @@ export interface RegisterMessage {
     id: string;           // 9 haneli makine ID
     display_name: string; // Görünen ad
     hardware_id?: string; // Windows MachineGuid (32 hex)
+    has_session_password?: boolean;
+}
+
+export interface ConnectPendingMessage {
+    type: 'connect_pending';
+    session_id: string;
+    target_has_password: boolean;
+}
+
+export interface PasswordVerifyResultMessage {
+    type: 'password_verify_result';
+    session_id: string;
+    success: boolean;
 }
 
 export interface ConnectRequestMessage {
@@ -53,6 +66,7 @@ export type ClientToServerMessage =
     | RegisterMessage
     | ConnectRequestMessage
     | PasswordAttemptMessage
+    | PasswordVerifyResultMessage
     | ConnectResponseMessage
     | RelayDataMessage
     | PingMessage
@@ -132,6 +146,7 @@ export interface PresenceListMessage {
 export type ServerToClientMessage =
     | RegisteredMessage
     | IncomingRequestMessage
+    | ConnectPendingMessage
     | PasswordRequiredMessage
     | PasswordResultMessage
     | ConnectAcceptedMessage

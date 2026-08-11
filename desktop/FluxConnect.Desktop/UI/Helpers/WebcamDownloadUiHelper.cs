@@ -9,10 +9,10 @@ namespace FluxConnect.Desktop.UI.Helpers;
 /// <summary>Webcam indirme sırasında ikon butonunda animasyon gösterir.</summary>
 public static class WebcamDownloadUiHelper
 {
-    private static readonly Dictionary<Button, Storyboard> ActiveAnimations = new();
+    private static readonly Dictionary<System.Windows.Controls.Button, Storyboard> ActiveAnimations = new();
 
     /// <summary>Kullanıcı onayı + indirme + animasyon. Başarılıysa webcam açılabilir.</summary>
-    public static async Task<bool> EnsureOpenCvWithUiAsync(Button webcamButton, Window owner)
+    public static async Task<bool> EnsureOpenCvWithUiAsync(System.Windows.Controls.Button webcamButton, Window owner)
     {
         if (OpenCvNativeManager.IsInstalled)
         {
@@ -44,7 +44,7 @@ public static class WebcamDownloadUiHelper
         }
     }
 
-    public static void StartDownloadingAnimation(Button btn)
+    public static void StartDownloadingAnimation(System.Windows.Controls.Button btn)
     {
         StopDownloadingAnimation(btn);
 
@@ -55,7 +55,7 @@ public static class WebcamDownloadUiHelper
 
         var rotate = new RotateTransform(0);
         btn.RenderTransform = rotate;
-        btn.RenderTransformOrigin = new Point(0.5, 0.5);
+        btn.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
 
         var spin = new DoubleAnimation(0, 360, TimeSpan.FromSeconds(1.2))
         {
@@ -79,7 +79,7 @@ public static class WebcamDownloadUiHelper
         ActiveAnimations[btn] = board;
     }
 
-    public static void StopDownloadingAnimation(Button btn)
+    public static void StopDownloadingAnimation(System.Windows.Controls.Button btn)
     {
         if (ActiveAnimations.TryGetValue(btn, out var board))
         {

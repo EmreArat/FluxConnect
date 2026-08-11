@@ -70,6 +70,12 @@ public class AppConfig
     [JsonPropertyName("auto_accept")]
     public bool AutoAccept { get; set; } = false;
 
+    [JsonPropertyName("start_with_windows")]
+    public bool StartWithWindows { get; set; } = true;
+
+    [JsonPropertyName("start_minimized_to_tray")]
+    public bool StartMinimizedToTray { get; set; } = true;
+
     [JsonPropertyName("recording_path")]
     public string RecordingPath { get; set; } = Path.Combine(
         AppContext.BaseDirectory, "Recordings");

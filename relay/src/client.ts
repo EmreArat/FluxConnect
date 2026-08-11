@@ -74,7 +74,7 @@ export class ClientHandler {
                 break;
 
             case 'register':
-                this.handleRegister(msg.id, msg.display_name, msg.hardware_id);
+                this.handleRegister(msg.id, msg.display_name, msg.hardware_id, msg.has_session_password ?? false);
                 break;
 
             case 'connect_request':
@@ -83,6 +83,10 @@ export class ClientHandler {
 
             case 'password_attempt':
                 this.handlePasswordAttempt(msg.session_id, msg.password_hash);
+                break;
+
+            case 'password_verify_result':
+                this.handlePasswordVerifyResult(msg.session_id, msg.success);
                 break;
 
             case 'connect_response':
@@ -109,14 +113,14 @@ export class ClientHandler {
     // ----------------------------------------------------------------
     // Kayıt
     // ----------------------------------------------------------------
-    private handleRegister(id: string, displayName: string, hardwareId?: string): void {
+    private handleRegister(id: string, displayName: string, hardwareId?: string, hasSessionPassword = false): void {
         // ID formatı: tam olarak 9 rakam
         if (!/^\d{9}$/.test(id)) {
             this.send({ type: 'error', code: 'INVALID_ID', message: 'ID 9 haneli sayı olmalıdır.' });
             return;
         }
 
-        const ok = this.hub.register(id, displayName, this.ws, this.ip, hardwareId);
+        const ok = this.hub.register(id, displayName, this.ws, this.ip, hardwareId, hasSessionPassword);
         if (!ok) {
             this.send({ type: 'error', code: 'ID_TAKEN', message: 'Bu ID zaten kullanımda.' });
             return;
@@ -150,13 +154,22 @@ export class ClientHandler {
 
         const requester = this.hub.getClient(this.clientId)!;
 
+        const target = this.hub.getClient(resolvedId)!;
+
         // Hedef tarafa bildir
         this.hub.sendToClient(resolvedId, {
             type: 'incoming_request',
             from_id: this.clientId,
             from_display_name: requester.displayName,
             session_id: session.sessionId,
-            requires_password: false,
+            requires_password: target.hasSessionPassword,
+        });
+
+        // İstekte bulunana oturum bilgisi
+        this.hub.sendToClient(this.clientId!, {
+            type: 'connect_pending',
+            session_id: session.sessionId,
+            target_has_password: target.hasSessionPassword,
         });
 
         console.log(`[Handler] 📤 Bağlantı isteği: ${this.clientId} → ${resolvedId} (hedef: ${targetId}) | Oturum: ${session.sessionId}`);
@@ -184,6 +197,30 @@ export class ClientHandler {
     // ----------------------------------------------------------------
     // Bağlantı Yanıtı (Kabul / Reddet)
     // ----------------------------------------------------------------
+    private handlePasswordVerifyResult(sessionId: string, success: boolean): void {
+        if (!this.clientId) return;
+
+        const session = this.hub.getSession(sessionId);
+        if (!session || session.targetId !== this.clientId) return;
+
+        this.hub.sendToClient(session.requesterId, {
+            type: 'password_result',
+            session_id: sessionId,
+            success,
+        });
+
+        if (!success) {
+            this.hub.sendToClient(session.requesterId, {
+                type: 'password_result',
+                session_id: sessionId,
+                success: false,
+            });
+            return;
+        }
+
+        // Başarılı şifre doğrulaması connect_response ile tamamlanır (AcceptAsync)
+    }
+
     private handleConnectResponse(sessionId: string, accepted: boolean): void {
         const session = this.hub.getSession(sessionId);
         if (!session || session.targetId !== this.clientId) {

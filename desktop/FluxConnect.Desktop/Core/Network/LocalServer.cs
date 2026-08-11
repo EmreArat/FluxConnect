@@ -31,10 +31,13 @@ public class LocalServer : IDisposable
     public bool IsRunning => _cts != null && !_cts.IsCancellationRequested;
     public bool HasClient => _activeClient?.State == WebSocketState.Open;
 
-    /// <summary>Gelen bağlantı isteği: (peerName, password, hardwareId, machineId) → UI'a yönlendirilir</summary>
+    /// <summary>Gelen bağlantı isteği: (peerName, passwordHash, hardwareId, machineId)</summary>
     public event Action<string, string, string, string>? OnConnectionRequest;
 
     public event Action<string>? OnDataReceived;
+
+    /// <summary>LAN şifre denemesi (password_hash)</summary>
+    public event Action<string>? OnPasswordAttempt;
 
     /// <summary>Decode edilmiş binary relay frame</summary>
     public event Action<RelayFrame>? OnRelayFrameReceived;
@@ -217,10 +220,15 @@ public class LocalServer : IDisposable
             {
                 case "connect_request":
                     var peerName = msg["display_name"]?.GetValue<string>() ?? "Bilinmiyor";
-                    var password = msg["password"]?.GetValue<string>() ?? "";
+                    var passwordHash = msg["password_hash"]?.GetValue<string>() ?? "";
                     var hardwareId = msg["hardware_id"]?.GetValue<string>() ?? "";
                     var machineId = msg["machine_id"]?.GetValue<string>() ?? "";
-                    OnConnectionRequest?.Invoke(peerName, password, hardwareId, machineId);
+                    OnConnectionRequest?.Invoke(peerName, passwordHash, hardwareId, machineId);
+                    break;
+
+                case "password_attempt":
+                    var attemptHash = msg["password_hash"]?.GetValue<string>() ?? "";
+                    OnPasswordAttempt?.Invoke(attemptHash);
                     break;
 
                 case "relay":

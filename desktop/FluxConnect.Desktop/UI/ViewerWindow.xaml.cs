@@ -7,7 +7,6 @@ using FluxConnect.Desktop.Core.Session;
 using FluxConnect.Desktop.Core.Media;
 using FluxConnect.Desktop.UI.Helpers;
 using Brush = System.Windows.Media.Brush;
-using MessageBox = System.Windows.MessageBox;
 
 namespace FluxConnect.Desktop.UI;
 

@@ -15,7 +15,6 @@ using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using Color = System.Windows.Media.Color;
 using Brush = System.Windows.Media.Brush;
 using Clipboard = System.Windows.Clipboard;
-using MessageBox = System.Windows.MessageBox;
 
 namespace FluxConnect.Desktop.UI;
 
@@ -31,6 +30,10 @@ public partial class MainWindow : Window
     private string? _pendingHardwareConnect;
     private bool _showFavoritesTab;
     private int _isProcessingTargetWebcam;
+    private ConnectPasswordDialog? _connectPasswordDialog;
+    private AcceptConnectionDialog? _incomingDialog;
+    private string? _pendingPasswordSessionId;
+    private bool _isExiting;
 
     public MainWindow()
     {
@@ -38,6 +41,28 @@ public partial class MainWindow : Window
         BindSessionEvents();
         InitializeUI();
         _ = ConnectToRelayAsync();
+    }
+
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (!_isExiting)
+        {
+            e.Cancel = true;
+            Hide();
+        }
+        base.OnClosing(e);
+    }
+
+    public void OpenSettings()
+    {
+        var dialog = new SettingsWindow { Owner = IsVisible ? this : null };
+        dialog.ShowDialog();
+    }
+
+    private void ExitApplication()
+    {
+        _isExiting = true;
+        Application.Current.Shutdown();
     }
 
     // ----------------------------------------------------------------
@@ -74,7 +99,7 @@ public partial class MainWindow : Window
         ApplyTabButtonStyle(BtnTabFavorites, favorites);
     }
 
-    private void ApplyTabButtonStyle(Button btn, bool selected)
+    private void ApplyTabButtonStyle(System.Windows.Controls.Button btn, bool selected)
     {
         btn.Background = selected
             ? (Brush)FindResource("PrimaryBrush")
@@ -94,7 +119,7 @@ public partial class MainWindow : Window
         {
             await _session.StartAsync();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Eğer Relay internet uzaktaki sunucusuna bağlanılamazsa 
             // kullanıcıyı korkutmamak için durumu kibarca bildirip sadece LAN modunda olduğunu vurgulayalım
@@ -147,16 +172,49 @@ public partial class MainWindow : Window
         _session.OnIncomingRequest += (fromId, fromName, sessionId, requiresPassword) =>
             Dispatcher.Invoke(() => ShowIncomingRequest(fromId, fromName, sessionId, requiresPassword));
 
+        _session.OnConnectPending += (sessionId, targetHasPassword) =>
+            Dispatcher.Invoke(() => ShowConnectPasswordDialog(sessionId, targetHasPassword, null));
+
+        _session.OnPasswordResult += (sessionId, success) =>
+            Dispatcher.Invoke(() =>
+            {
+                if (_connectPasswordDialog?.IsVisible == true && _pendingPasswordSessionId == sessionId)
+                {
+                    if (success)
+                        _connectPasswordDialog.CloseSuccess();
+                    else
+                        _connectPasswordDialog.SetStatus("Yanlış şifre.");
+                }
+            });
+
         _session.OnSessionStarted += session =>
             Dispatcher.Invoke(() =>
             {
                 _pendingHardwareConnect = null;
+                _incomingDialog?.Close();
+                _incomingDialog = null;
+                _connectPasswordDialog?.CloseSuccess();
                 OnSessionStarted(session);
             });
 
         _session.OnSessionRejected += (sessionId, reason) =>
             Dispatcher.Invoke(() =>
             {
+                if (_connectPasswordDialog?.IsVisible == true)
+                {
+                    var rejectMsg = reason switch
+                    {
+                        "rejected" => "Bağlantı reddedildi.",
+                        "wrong_password" => "Yanlış şifre.",
+                        "timeout" => "Bağlantı isteği zaman aşımına uğradı.",
+                        "locked" => "Çok fazla yanlış deneme. Lütfen bekleyin.",
+                        _ => $"Bağlantı sonlandı: {reason}",
+                    };
+                    _connectPasswordDialog.CloseRejected(rejectMsg);
+                    _connectPasswordDialog = null;
+                    _pendingPasswordSessionId = null;
+                }
+
                 if (TargetControlPanel.Visibility == Visibility.Visible)
                 {
                     TargetControlPanel.Visibility = Visibility.Collapsed;
@@ -226,12 +284,17 @@ public partial class MainWindow : Window
     // ----------------------------------------------------------------
     private void ShowIncomingRequest(string fromId, string fromName, string sessionId, bool requiresPassword)
     {
-        var dialog = new AcceptConnectionDialog(fromId, fromName, sessionId, requiresPassword)
+        App.Tray.ShowBalloon("FluxConnect", $"{fromName} bağlanmak istiyor.");
+
+        _incomingDialog?.Close();
+        _incomingDialog = new AcceptConnectionDialog(fromId, fromName, sessionId, requiresPassword)
         {
-            Owner = this
+            Owner = null,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            Topmost = true
         };
 
-        if (dialog.ShowDialog() == true)
+        if (_incomingDialog.ShowDialog() == true)
         {
             if (fromId == "LAN")
                 _ = _session.LanAcceptAsync();
@@ -245,6 +308,38 @@ public partial class MainWindow : Window
             else
                 _ = _session.RejectAsync(sessionId);
         }
+
+        _incomingDialog = null;
+    }
+
+    private void ShowConnectPasswordDialog(string sessionId, bool targetHasPassword, DirectClient? lanClient)
+    {
+        _pendingPasswordSessionId = sessionId;
+
+        if (_connectPasswordDialog?.IsVisible == true)
+            return;
+
+        _connectPasswordDialog = new ConnectPasswordDialog
+        {
+            Owner = IsVisible ? this : null,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen
+        };
+
+        var capturedClient = lanClient;
+        var capturedSession = sessionId;
+        _connectPasswordDialog.Closed += async (_, _) =>
+        {
+            if (_connectPasswordDialog?.SubmittedPasswordHash is { } hash)
+            {
+                if (capturedClient != null)
+                    await _session.SendLanPasswordAttemptAsync(capturedClient, hash);
+                else if (capturedSession != "lan_pending")
+                    await _session.SendPasswordAttemptAsync(capturedSession, hash);
+            }
+            _connectPasswordDialog = null;
+        };
+
+        _connectPasswordDialog.Show();
     }
 
     // ----------------------------------------------------------------
@@ -470,6 +565,8 @@ public partial class MainWindow : Window
                 App.Config.HardwareId,
                 App.Config.MachineId);
 
+            ShowConnectPasswordDialog("lan_pending", !string.IsNullOrEmpty(App.Config.SessionPasswordHash), client);
+
             client.OnMessageReceived += (msg) =>
             {
                 Dispatcher.Invoke(() =>
@@ -563,11 +660,7 @@ public partial class MainWindow : Window
         timer.Start();
     }
 
-    private void BtnSettings_Click(object sender, RoutedEventArgs e)
-    {
-        // TODO: SettingsWindow (Faz 1 devamı)
-        MessageBox.Show("Ayarlar yakında eklenecek.", "FluxConnect", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
+    private void BtnSettings_Click(object sender, RoutedEventArgs e) => OpenSettings();
 
     // ----------------------------------------------------------------
     // TextBox Canlı Kontrol
@@ -711,7 +804,7 @@ public partial class MainWindow : Window
     {
         while (source != null)
         {
-            if (source is Button)
+            if (source is System.Windows.Controls.Button)
                 return true;
             source = VisualTreeHelper.GetParent(source);
         }
@@ -733,9 +826,9 @@ public partial class MainWindow : Window
         return dt.ToString("dd.MM.yyyy HH:mm");
     }
 
-    private static Button CreateContactActionButton(string content, string tooltip, double fontSize = 12)
+    private static System.Windows.Controls.Button CreateContactActionButton(string content, string tooltip, double fontSize = 12)
     {
-        return new Button
+        return new System.Windows.Controls.Button
         {
             Content = content,
             FontSize = fontSize,
@@ -801,7 +894,7 @@ public partial class MainWindow : Window
         Grid.SetColumn(dot, 0);
         grid.Children.Add(dot);
 
-        var nameBlock = new StackPanel { Orientation = Orientation.Vertical, VerticalAlignment = VerticalAlignment.Center };
+        var nameBlock = new StackPanel { Orientation = System.Windows.Controls.Orientation.Vertical, VerticalAlignment = VerticalAlignment.Center };
         var displayText = string.IsNullOrEmpty(contact.DisplayName) ? contact.Address : contact.DisplayName;
 
         var titleRow = new Grid();
@@ -846,7 +939,7 @@ public partial class MainWindow : Window
 
         var buttonsPanel = new StackPanel
         {
-            Orientation = Orientation.Horizontal,
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(4, 0, 0, 0)
         };

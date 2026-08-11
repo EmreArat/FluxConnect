@@ -76,14 +76,10 @@
                         Grid.Row="2"
                         Margin="0,0,0,16"
                         Visibility="Collapsed">
-                <TextBlock Text="Bu makine için bağlantı şifresi zorunludur."
+                <TextBlock Text="Bu makine opsiyonel oturum şifresi kullanıyor. Bağlanan şifre ile de kabul edebilir."
                            Foreground="{StaticResource TextSecondaryBrush}"
                            FontSize="11"
-                           Margin="0,0,0,6"/>
-                <TextBox x:Name="TxtPassword"
-                         Style="{StaticResource ModernTextBox}"
-                         IsReadOnly="True"
-                         Foreground="{StaticResource TextMutedBrush}"/>
+                           TextWrapping="Wrap"/>
             </StackPanel>
 
             <Grid Grid.Row="3">
