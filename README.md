@@ -9,7 +9,7 @@ Güvenli uzaktan masaüstü bağlantı uygulaması (Windows). LAN ve internet (r
 
 ## Kurulum
 
-1. [Releases](https://github.com/FluxHub/FluxConnect/releases) sayfasından `FluxConnect.exe` indirin.
+1. [Releases](https://github.com/EmreArat/FluxConnect/releases) sayfasından `FluxConnect.exe` indirin.
 2. Çalıştırın — kurulum sihirbazı gerekmez.
 
 ## Özellikler

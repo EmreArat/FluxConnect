@@ -11,7 +11,7 @@ namespace FluxConnect.Desktop;
 
 public partial class App : Application
 {
-    public const string GitHubRepo = "FluxHub/FluxConnect";
+    public const string GitHubRepo = "EmreArat/FluxConnect";
 
     public static AppConfig Config { get; private set; } = null!;
     public static RelayClient Relay { get; private set; } = null!;
