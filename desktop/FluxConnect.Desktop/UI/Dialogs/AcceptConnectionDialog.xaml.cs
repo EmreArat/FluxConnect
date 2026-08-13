@@ -4,6 +4,8 @@ namespace FluxConnect.Desktop.UI.Dialogs;
 
 public partial class AcceptConnectionDialog : Window
 {
+    public bool Accepted { get; private set; }
+
     public AcceptConnectionDialog(
         string fromId,
         string fromDisplayName,
@@ -23,13 +25,13 @@ public partial class AcceptConnectionDialog : Window
 
     private void BtnAccept_Click(object sender, RoutedEventArgs e)
     {
-        DialogResult = true;
+        Accepted = true;
         Close();
     }
 
     private void BtnReject_Click(object sender, RoutedEventArgs e)
     {
-        DialogResult = false;
+        Accepted = false;
         Close();
     }
 

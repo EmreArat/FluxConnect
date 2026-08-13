@@ -170,7 +170,7 @@ public partial class MainWindow : Window
             });
 
         _session.OnIncomingRequest += (fromId, fromName, sessionId, requiresPassword) =>
-            Dispatcher.Invoke(() => ShowIncomingRequest(fromId, fromName, sessionId, requiresPassword));
+            Dispatcher.BeginInvoke(() => ShowIncomingRequest(fromId, fromName, sessionId, requiresPassword));
 
         _session.OnConnectPending += (sessionId, targetHasPassword) =>
             Dispatcher.Invoke(() => ShowConnectPasswordDialog(sessionId, targetHasPassword, null));
@@ -285,29 +285,40 @@ public partial class MainWindow : Window
         App.Tray.ShowBalloon("FluxConnect", $"{fromName} bağlanmak istiyor.");
 
         _incomingDialog?.Close();
-        _incomingDialog = new AcceptConnectionDialog(fromId, fromName, sessionId, requiresPassword)
+        var dialog = new AcceptConnectionDialog(fromId, fromName, sessionId, requiresPassword)
         {
             Owner = null,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
             Topmost = true
         };
+        _incomingDialog = dialog;
 
-        if (_incomingDialog.ShowDialog() == true)
+        dialog.Closed += (_, _) =>
         {
-            if (fromId == "LAN")
-                _ = _session.LanAcceptAsync();
-            else
-                _ = _session.AcceptAsync(sessionId, fromId, fromName);
-        }
-        else
-        {
-            if (fromId == "LAN")
-                _ = _session.LanRejectAsync();
-            else
-                _ = _session.RejectAsync(sessionId);
-        }
+            if (ReferenceEquals(_incomingDialog, dialog))
+                _incomingDialog = null;
 
-        _incomingDialog = null;
+            // Şifre ile zaten kabul edildiyse reddetme.
+            if (_session.CurrentSession != null)
+                return;
+
+            if (dialog.Accepted)
+            {
+                if (fromId == "LAN")
+                    _ = _session.LanAcceptAsync();
+                else
+                    _ = _session.AcceptAsync(sessionId, fromId, fromName);
+            }
+            else
+            {
+                if (fromId == "LAN")
+                    _ = _session.LanRejectAsync();
+                else
+                    _ = _session.RejectAsync(sessionId);
+            }
+        };
+
+        dialog.Show();
     }
 
     private void ShowConnectPasswordDialog(string sessionId, bool targetHasPassword, DirectClient? lanClient)
