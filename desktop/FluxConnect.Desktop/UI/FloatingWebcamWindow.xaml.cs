@@ -10,6 +10,7 @@ namespace FluxConnect.Desktop.UI;
 public partial class FloatingWebcamWindow : Window
 {
     private bool _hasFrame = false;
+    private bool _forceClose;
 
     /// <summary>Kullanıcı kamera penceresindeki kapat (✕) işaretine bastığında tetiklenir.</summary>
     public event Action? OnUserClosed;
@@ -23,6 +24,7 @@ public partial class FloatingWebcamWindow : Window
 
         Closing += (_, e) =>
         {
+            if (_forceClose) return;
             e.Cancel = true;
             OnUserClosed?.Invoke();
             Hide();
@@ -47,6 +49,12 @@ public partial class FloatingWebcamWindow : Window
             _hasFrame = true;
             WaitingOverlay.Visibility = Visibility.Collapsed;
         }
+    }
+
+    public void ForceClose()
+    {
+        _forceClose = true;
+        Close();
     }
 
     // ---- Kapat: WindowTitleBar Close → Closing olayı Hide() çağırır ----

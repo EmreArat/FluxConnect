@@ -20,7 +20,6 @@ public partial class ViewerWindow : Window
     private FloatingTransferWindow? _transferWindow;
     private bool _isClosing = false;
     private bool _forceClose = false;
-    private bool _sessionAlreadyEnded = false;
     private int _isProcessingFrame = 0;
     private int _isProcessingWebcam = 0;
 
@@ -64,55 +63,12 @@ public partial class ViewerWindow : Window
         InitializeSession();
         BindInputEvents();
         BindMediaEvents();
-        
-        // Ana pencere kapandığında (veya çarpıya basıldığında) oturumu güvenle bitir
-        this.Closing += async (s, e) => 
+
+        Closing += (_, e) =>
         {
-            if (!_forceClose)
-            {
-                e.Cancel = true;
-                MessageBox.Show("Lütfen pencereyi kapatmak için sağ üstteki 'Bağlantıyı Kes' butonunu kullanın.", "Uyarı", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            if (_isClosing) return; // İkinci kez tetiklendiğinde normal kapanışa izin ver.
-
-            e.Cancel = true; // Kapanmayı geçici durdur
-            _isClosing = true;
-
-            _floatingWebcam?.Close();
-            _floatingWebcam = null;
-            _transferWindow?.Close();
-            _transferWindow = null;
-
-            // Medya ve soket dinleyicilerini kaldır
-            _media.Dispose();
-            _fileManager.Dispose();
-
-            if (_session.IsLanMode && _session.DirectClient != null)
-            {
-                _session.DirectClient.OnMessageReceived -= OnLanMessageReceived;
-                _session.DirectClient.OnDisconnected -= OnLanDisconnected;
-            }
-            else
-            {
-                App.Session.OnRelayData -= OnDataReceived;
-                App.Session.OnSessionRejected -= OnSessionClosed;
-            }
-
-            if (!_sessionAlreadyEnded)
-            {
-                try
-                {
-                    await App.Session.EndCurrentSessionAsync();
-                }
-                catch
-                {
-                    // Ana uygulama ayakta kalsın
-                }
-            }
-
-            Close();
+            if (_forceClose) return;
+            e.Cancel = true;
+            MessageBox.Show("Lütfen pencereyi kapatmak için sağ üstteki 'Bağlantıyı Kes' butonunu kullanın.", "Uyarı", MessageBoxButton.OK, MessageBoxImage.Warning);
         };
     }
 
@@ -298,10 +254,7 @@ public partial class ViewerWindow : Window
 
     private void OnLanDisconnected()
     {
-        Dispatcher.Invoke(() =>
-        {
-            CloseViewerAfterRemoteEnd("LAN bağlantısı kesildi.");
-        });
+        Dispatcher.Invoke(() => _ = EndViewerAsync(notifyPeer: false, "LAN bağlantısı kesildi."));
     }
 
     // ----------------------------------------------------------------
@@ -564,29 +517,20 @@ public partial class ViewerWindow : Window
     private void OnSessionClosed(string sessionId, string reason)
     {
         if (sessionId != _session.SessionId) return;
-
-        Dispatcher.Invoke(() =>
-        {
-            App.Session.OnRelayData -= OnDataReceived;
-            App.Session.OnSessionRejected -= OnSessionClosed;
-            CloseViewerAfterRemoteEnd($"Oturum kapatıldı: {reason}");
-        });
+        Dispatcher.Invoke(() => _ = EndViewerAsync(notifyPeer: false, $"Oturum kapatıldı: {reason}"));
     }
 
-    private void CloseViewerAfterRemoteEnd(string message)
+    private async void BtnEndSession_Click(object sender, RoutedEventArgs e)
+    {
+        await EndViewerAsync(notifyPeer: true);
+    }
+
+    private async Task EndViewerAsync(bool notifyPeer, string? message = null)
     {
         if (_isClosing) return;
-        _sessionAlreadyEnded = true;
+        _isClosing = true;
         _forceClose = true;
-        MessageBox.Show(message, "Bilgi", MessageBoxButton.OK, MessageBoxImage.Information);
-        Close();
-    }
 
-    private void BtnEndSession_Click(object sender, RoutedEventArgs e)
-    {
-        _forceClose = true;
-        
-        // Kapanırken karşı tarafından sonlandırıldı bildirimi vb çıkmasın
         if (_session.IsLanMode && _session.DirectClient != null)
         {
             _session.DirectClient.OnDisconnected -= OnLanDisconnected;
@@ -598,6 +542,23 @@ public partial class ViewerWindow : Window
             App.Session.OnRelayData -= OnDataReceived;
         }
 
-        Close(); // Closing eventini tetikler
+        _floatingWebcam?.ForceClose();
+        _floatingWebcam = null;
+        _transferWindow?.Close();
+        _transferWindow = null;
+        _media.Dispose();
+        _fileManager.Dispose();
+
+        if (notifyPeer)
+        {
+            try { await App.Session.EndCurrentSessionAsync(); }
+            catch { /* Ana pencere açık kalsın */ }
+        }
+
+        if (!string.IsNullOrEmpty(message))
+            MessageBox.Show(message, "Bilgi", MessageBoxButton.OK, MessageBoxImage.Information);
+
+        App.MainWindowInstance?.RestoreAfterSession();
+        Close();
     }
 }

@@ -7,6 +7,8 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 
+using FluxConnect.Desktop.Core.Security;
+
 namespace FluxConnect.Desktop.Core.Network;
 
 /// <summary>
@@ -85,8 +87,23 @@ public class DirectClient : IDisposable
         if (RelayFrameCodec.TryPackFromLegacy(data, out var frameBytes))
         {
             var type = RelayFrameCodec.ClassifyLegacy(data) ?? RelayFrameType.LegacyText;
-            var wire = RelayWireCodec.PackLan(frameBytes);
+            if (!RelayFrameCodec.TryUnpack(frameBytes, out var unpacked))
+                return Task.CompletedTask;
+            var protectedBytes = E2EFrame.Protect(unpacked.Type, unpacked.Payload.Span, out _);
+            if (protectedBytes.Length == 0)
+                return Task.CompletedTask;
+            var wire = RelayWireCodec.PackLan(protectedBytes);
             _sendPipeline.EnqueueRelayWire(type, wire);
+            return Task.CompletedTask;
+        }
+
+        if (E2EContext.IsReady)
+        {
+            var protectedBytes = E2EFrame.Protect(RelayFrameType.LegacyText, Encoding.UTF8.GetBytes(data), out _);
+            if (protectedBytes.Length == 0)
+                return Task.CompletedTask;
+            var wire = RelayWireCodec.PackLan(protectedBytes);
+            _sendPipeline.EnqueueRelayWire(RelayFrameType.LegacyText, wire);
             return Task.CompletedTask;
         }
 
@@ -100,7 +117,9 @@ public class DirectClient : IDisposable
         if (_ws?.State != WebSocketState.Open)
             return Task.CompletedTask;
 
-        var frameBytes = RelayFrameCodec.Pack(type, payload);
+        var frameBytes = E2EFrame.Protect(type, payload, out _);
+        if (frameBytes.Length == 0)
+            return Task.CompletedTask;
         var wire = RelayWireCodec.PackLan(frameBytes);
         _sendPipeline.EnqueueRelayWire(type, wire);
         return Task.CompletedTask;
@@ -173,7 +192,11 @@ public class DirectClient : IDisposable
                 {
                     if (RelayWireCodec.TryUnpackLan(messageBytes, out var frame))
                     {
+                        if (!E2EFrame.TryUnwrap(frame, out frame))
+                            continue;
                         var legacy = RelayFrameCodec.ToLegacyString(frame);
+                        if (string.IsNullOrEmpty(legacy))
+                            continue;
                         var synthetic = new JsonObject { ["type"] = "relay", ["data"] = legacy };
                         OnMessageReceived?.Invoke(synthetic);
                     }

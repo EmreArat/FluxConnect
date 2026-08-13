@@ -19,6 +19,7 @@ public partial class SettingsWindow : Window
         var config = App.Config;
         ChkStartWithWindows.IsChecked = config.StartWithWindows;
         ChkStartMinimizedToTray.IsChecked = config.StartMinimizedToTray;
+        TxtRelayUrl.Text = config.RelayUrl ?? string.Empty;
         TxtVersion.Text = $"Sürüm: {UpdateService.CurrentVersion}";
         TxtUpdateStatus.Text = string.Empty;
     }
@@ -29,6 +30,15 @@ public partial class SettingsWindow : Window
 
         config.StartWithWindows = ChkStartWithWindows.IsChecked == true;
         config.StartMinimizedToTray = ChkStartMinimizedToTray.IsChecked == true;
+
+        if (!ConfigManager.TryNormalizeRelayUrl(TxtRelayUrl.Text, out var relayUrl, out var relayError))
+        {
+            MessageBox.Show(relayError, "Ayarlar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var relayChanged = !string.Equals(config.RelayUrl, relayUrl, StringComparison.OrdinalIgnoreCase);
+        config.RelayUrl = relayUrl;
 
         if (ChkClearPassword.IsChecked == true)
         {
@@ -57,7 +67,10 @@ public partial class SettingsWindow : Window
         ConfigManager.Save(config);
         StartupHelper.ConfigureStartup(config.StartWithWindows, config.StartMinimizedToTray);
 
-        _ = App.Session.RefreshRegistrationAsync();
+        if (relayChanged || !App.Relay.IsConnected)
+            _ = App.Session.ReconnectRelayAsync();
+        else
+            _ = App.Session.RefreshRegistrationAsync();
 
         DialogResult = true;
         Close();

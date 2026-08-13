@@ -138,6 +138,43 @@ public static class ConfigManager
         File.WriteAllText(ConfigPath, json);
     }
 
+    /// <summary>
+    /// Boş adres LAN-only demektir. http(s) şeması ws(s)'e çevrilir;
+    /// şemasız girişe ws:// eklenir.
+    /// </summary>
+    public static bool TryNormalizeRelayUrl(string? input, out string normalized, out string error)
+    {
+        normalized = string.Empty;
+        error = string.Empty;
+
+        var raw = (input ?? string.Empty).Trim();
+        if (raw.Length == 0)
+            return true;
+
+        if (raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            raw = "ws://" + raw["http://".Length..];
+        else if (raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            raw = "wss://" + raw["https://".Length..];
+        else if (!raw.StartsWith("ws://", StringComparison.OrdinalIgnoreCase) &&
+                 !raw.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+            raw = "ws://" + raw;
+
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeWs && uri.Scheme != Uri.UriSchemeWss &&
+             uri.Scheme != "ws" && uri.Scheme != "wss") ||
+            string.IsNullOrEmpty(uri.Host))
+        {
+            error = "Relay adresi geçersiz. Örnek: wss://relay.ornek.com:8765";
+            return false;
+        }
+
+        normalized = uri.GetLeftPart(UriPartial.Authority);
+        if (uri.AbsolutePath is { Length: > 1 } path)
+            normalized += path.TrimEnd('/');
+
+        return true;
+    }
+
     private static AppConfig CreateAndSaveDefault()
     {
         var config = CreateFreshConfig();

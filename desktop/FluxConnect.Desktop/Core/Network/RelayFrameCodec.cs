@@ -14,6 +14,8 @@ public enum RelayFrameType : byte
     Info = 6,
     Command = 7,
     LegacyText = 8,
+    Handshake = 9,
+    Encrypted = 10,
 }
 
 /// <summary>Decode edilmiş relay frame.</summary>
@@ -137,6 +139,8 @@ public static class RelayFrameCodec
             RelayFrameType.Info => "INF:" + Convert.ToBase64String(payload),
             RelayFrameType.Command => "CMD:" + Encoding.UTF8.GetString(payload),
             RelayFrameType.LegacyText => Encoding.UTF8.GetString(payload),
+            RelayFrameType.Handshake => "E2E:HELLO:" + Convert.ToBase64String(payload),
+            RelayFrameType.Encrypted => string.Empty,
             _ => Encoding.UTF8.GetString(payload),
         };
     }

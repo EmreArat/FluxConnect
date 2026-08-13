@@ -1,5 +1,3 @@
-using FluxConnect.Desktop.UI;
-
 namespace FluxConnect.Desktop.Core.Update;
 
 public sealed class AutoUpdateResult
@@ -10,8 +8,8 @@ public sealed class AutoUpdateResult
 }
 
 /// <summary>
-/// Açılışta güncellemeyi arka planda indirir; oturum yoksa uygular.
-/// Bildirim yalnızca işlem bittikten sonra (yeniden açılışta) yapılır.
+/// Açılışta güncellemeyi arka planda indirir. Uygulama oturum bitince kapanmaz;
+/// yeni sürüm bir sonraki açılışta uygulanır, bildirim o zaman yapılır.
 /// </summary>
 public static class AutoUpdateCoordinator
 {
@@ -27,19 +25,30 @@ public static class AutoUpdateCoordinator
         }
     }
 
-    public static Task<AutoUpdateResult> EnsureStartedAsync(string githubRepo, bool restartMinimized)
+    public static Task<AutoUpdateResult> EnsureStartedAsync(string githubRepo, bool restartMinimized = false)
     {
+        _ = restartMinimized;
         lock (Gate)
         {
             if (_inFlight is { IsCompleted: false })
                 return _inFlight;
 
-            _inFlight = RunCoreAsync(githubRepo, restartMinimized);
+            _inFlight = RunCoreAsync(githubRepo);
             return _inFlight;
         }
     }
 
-    private static async Task<AutoUpdateResult> RunCoreAsync(string githubRepo, bool restartMinimized)
+    public static bool TryApplyPendingOnStartup(bool restartMinimized)
+    {
+        var pending = UpdateService.FindPendingUpdate();
+        if (pending == null)
+            return false;
+
+        UpdateService.ApplyUpdateAndRestart(pending.Value.Path, pending.Value.Version, restartMinimized);
+        return true;
+    }
+
+    private static async Task<AutoUpdateResult> RunCoreAsync(string githubRepo)
     {
         try
         {
@@ -52,19 +61,12 @@ public static class AutoUpdateCoordinator
                 };
             }
 
-            var path = await UpdateService.DownloadUpdateAsync(info);
-            await WaitUntilNoActiveSessionAsync();
-
-            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
-            {
-                UpdateService.ApplyUpdateAndRestart(path, info.Version, restartMinimized);
-            });
-
+            await UpdateService.DownloadUpdateAsync(info);
             return new AutoUpdateResult
             {
                 UpdateFound = true,
                 Version = info.Version,
-                Message = $"v{info.Version} uygulanıyor, uygulama yeniden başlatılacak."
+                Message = $"v{info.Version} indirildi. Sonraki açılışta uygulanacak."
             };
         }
         catch (Exception ex)
@@ -73,25 +75,6 @@ public static class AutoUpdateCoordinator
             {
                 Message = $"Güncelleme başarısız: {ex.Message}"
             };
-        }
-    }
-
-    private static async Task WaitUntilNoActiveSessionAsync()
-    {
-        var app = System.Windows.Application.Current;
-        while (true)
-        {
-            var sessionBusy = App.Session.CurrentSession != null;
-            var viewerBusy = false;
-            await app.Dispatcher.InvokeAsync(() =>
-            {
-                viewerBusy = app.Windows.OfType<ViewerWindow>().Any();
-            });
-
-            if (!sessionBusy && !viewerBusy)
-                return;
-
-            await Task.Delay(2000);
         }
     }
 }

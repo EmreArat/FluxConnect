@@ -82,7 +82,12 @@ public class SessionManager : IDisposable
 
     private void HandleRelayFrame(string sessionId, string fromId, RelayFrame frame)
     {
+        if (!E2EFrame.TryUnwrap(frame, out frame))
+            return;
+
         var data = RelayFrameCodec.ToLegacyString(frame);
+        if (string.IsNullOrEmpty(data))
+            return;
 
         if (data == "CMD:END_SESSION")
         {
@@ -225,6 +230,7 @@ public class SessionManager : IDisposable
             Role = SessionRole.Target,
             IsLanMode = true
         };
+        StartE2E(CurrentSession);
 
         // Ekran paylaşımını başlat — LAN modunda LocalServer üzerinden gönder
         try
@@ -254,10 +260,30 @@ public class SessionManager : IDisposable
     // ----------------------------------------------------------------
     // Relay'e Bağlan & Kayıt Ol
     // ----------------------------------------------------------------
-    public async Task StartAsync()
+    public async Task<bool> StartAsync()
     {
+        if (string.IsNullOrWhiteSpace(_config.RelayUrl))
+            return false;
+
         await _relay.ConnectAsync(_config.RelayUrl);
         await RegisterOnRelayAsync();
+        return true;
+    }
+
+    public async Task ReconnectRelayAsync()
+    {
+        try { await _relay.DisconnectAsync(); }
+        catch { /* Yeniden bağlanırken eski soket kapanmayabilir */ }
+
+        try
+        {
+            if (!await StartAsync())
+                OnRelayDisconnected?.Invoke();
+        }
+        catch
+        {
+            OnRelayDisconnected?.Invoke();
+        }
     }
 
     public async Task RefreshRegistrationAsync()
@@ -317,6 +343,7 @@ public class SessionManager : IDisposable
             PeerDisplayName = peerDisplayName,
             Role = SessionRole.Target,
         };
+        StartE2E(CurrentSession);
         
         // Ekran paylaşımını başlat
         try
@@ -445,6 +472,7 @@ public class SessionManager : IDisposable
                     PeerDisplayName = peerName,
                     Role = SessionRole.Requester,
                 };
+                StartE2E(CurrentSession);
 
                 // Başarılı bağlantı: kişiyi kaydet (relay ID + MachineGuid)
                 if (!string.IsNullOrEmpty(peerHardwareId))
@@ -570,6 +598,24 @@ public class SessionManager : IDisposable
         return false;
     }
 
+    /// <summary>Oturum E2E el sıkışmasını başlatır (her iki uç da çağırır).</summary>
+    public void StartE2E(ActiveSession session)
+    {
+        CurrentSession = session;
+        var channel = E2EContext.Replace();
+        var pk = channel.PublicKey.ToArray();
+        if (session.IsLanMode)
+        {
+            if (session.DirectClient != null)
+                _ = session.DirectClient.SendRelayFrameAsync(RelayFrameType.Handshake, pk);
+            else
+                _ = App.LanServer.SendRelayFrameAsync(RelayFrameType.Handshake, pk);
+            return;
+        }
+
+        _ = _relay.SendRelayFrameAsync(session.SessionId, session.PeerId, RelayFrameType.Handshake, pk);
+    }
+
     private void StopScreenSender()
     {
         if (_screenSender != null)
@@ -578,6 +624,7 @@ public class SessionManager : IDisposable
             _screenSender.Dispose();
             _screenSender = null;
         }
+        E2EContext.Clear();
     }
 
     public void Dispose()

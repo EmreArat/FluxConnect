@@ -113,6 +113,45 @@ public static class UpdateService
         return targetPath;
     }
 
+    public static (string Path, string Version)? FindPendingUpdate()
+    {
+        var dir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "FluxConnect", "Updates");
+        if (!Directory.Exists(dir))
+            return null;
+
+        string? bestPath = null;
+        string? bestLabel = null;
+        Version? bestVersion = null;
+
+        foreach (var file in Directory.GetFiles(dir, "FluxConnect-*.exe"))
+        {
+            if (new FileInfo(file).Length < 100_000)
+                continue;
+
+            var name = Path.GetFileNameWithoutExtension(file);
+            if (!name.StartsWith("FluxConnect-", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var label = name["FluxConnect-".Length..];
+            if (!Version.TryParse(NormalizeVersion(label), out var parsed))
+                continue;
+            if (!IsNewer(label, CurrentVersion))
+                continue;
+            if (bestVersion != null && parsed <= bestVersion)
+                continue;
+
+            bestPath = file;
+            bestLabel = label;
+            bestVersion = parsed;
+        }
+
+        return bestPath != null && bestLabel != null
+            ? (bestPath, bestLabel)
+            : null;
+    }
+
     public static void ApplyUpdateAndRestart(string downloadedExePath, string version, bool restartMinimized = false)
     {
         var currentExe = Environment.ProcessPath

@@ -4,7 +4,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:controls="clr-namespace:FluxConnect.Desktop.UI.Controls"
         Title="Ayarlar"
-        Height="520" Width="460"
+        Height="580" Width="460"
         ResizeMode="NoResize"
         WindowStyle="None"
         WindowStartupLocation="CenterOwner"
@@ -49,6 +49,24 @@
                           Content="Başlangıçta tepsiye küçült"
                           Foreground="{StaticResource TextPrimaryBrush}"
                           Margin="0,0,0,20"/>
+
+                <TextBlock Text="RELAY SUNUCUSU"
+                           Foreground="{StaticResource TextMutedBrush}"
+                           FontSize="10"
+                           FontWeight="SemiBold"
+                           Margin="0,0,0,8"/>
+
+                <TextBlock Text="Internet üzerinden ID ile bağlanmak için kendi relay adresinizi girin. Karşı tarafın da aynı adresi kullanması gerekir. Boş bırakılırsa yalnızca LAN çalışır."
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,8"/>
+
+                <TextBox x:Name="TxtRelayUrl"
+                         Style="{StaticResource ModernTextBox}"
+                         Height="36"
+                         Margin="0,0,0,20"
+                         ToolTip="Örnek: wss://relay.ornek.com:8765"/>
 
                 <TextBlock Text="OTURUM ŞİFRESİ (OPSİYONEL)"
                            Foreground="{StaticResource TextMutedBrush}"

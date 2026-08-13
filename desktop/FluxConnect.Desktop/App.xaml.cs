@@ -28,6 +28,13 @@ public partial class App : Application
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         Config = ConfigManager.Load();
+
+        var launchedMinimized = e.Args.Any(arg =>
+            arg.Equals(StartupHelper.MinimizedArg, StringComparison.OrdinalIgnoreCase));
+        var updatedVersion = ParseUpdatedVersion(e.Args);
+        if (updatedVersion == null && AutoUpdateCoordinator.TryApplyPendingOnStartup(launchedMinimized))
+            return;
+
         StartupHelper.ConfigureStartup(Config.StartWithWindows, Config.StartMinimizedToTray);
 
         Relay = new RelayClient();
@@ -50,10 +57,6 @@ public partial class App : Application
         MainWindow = MainWindowInstance;
         Tray.Attach(MainWindowInstance);
         MainWindowInstance.Closed += (_, _) => { MainWindowInstance = null; };
-
-        var launchedMinimized = e.Args.Any(arg =>
-            arg.Equals(StartupHelper.MinimizedArg, StringComparison.OrdinalIgnoreCase));
-        var updatedVersion = ParseUpdatedVersion(e.Args);
 
         // Tepsiye küçültme yalnızca Windows başlangıcında (--minimized) geçerli;
         // exe'ye çift tıklayınca ana pencere açılır.

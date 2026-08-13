@@ -65,6 +65,15 @@ public partial class MainWindow : Window
         Application.Current.Shutdown();
     }
 
+    public void RestoreAfterSession()
+    {
+        if (_isExiting) return;
+        Application.Current.MainWindow = this;
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
     // ----------------------------------------------------------------
     // UI Başlangıç
     // ----------------------------------------------------------------
@@ -117,7 +126,11 @@ public partial class MainWindow : Window
         SetStatus(false, "Bağlanıyor...");
         try
         {
-            await _session.StartAsync();
+            if (!await _session.StartAsync())
+            {
+                SetStatus(false, "Sadece Yerel Ağ (LAN) Modu - Relay yok");
+                return;
+            }
         }
         catch (Exception)
         {
@@ -218,9 +231,11 @@ public partial class MainWindow : Window
                     TargetControlPanel.Visibility = Visibility.Collapsed;
                     _targetMedia?.Dispose();
                     _targetMedia = null;
-                    _floatingWebcam?.Close();
+                    _floatingWebcam?.ForceClose();
                     _floatingWebcam = null;
                 }
+
+                RestoreAfterSession();
 
                 var msg = reason switch
                 {
@@ -365,12 +380,7 @@ public partial class MainWindow : Window
         {
             if (_isExiting) return;
             BtnConnect.IsEnabled = true;
-            if (!IsVisible)
-            {
-                Show();
-                WindowState = WindowState.Normal;
-            }
-            Activate();
+            RestoreAfterSession();
         };
     }
 
@@ -637,6 +647,7 @@ public partial class MainWindow : Window
                                 IsLanMode = true,
                                 DirectClient = client
                             };
+                            App.Session.StartE2E(session);
                             var viewer = new ViewerWindow(session);
                             AttachViewer(viewer);
                             viewer.Show();
@@ -717,6 +728,12 @@ public partial class MainWindow : Window
     // ----------------------------------------------------------------
     private async Task ReconnectAsync()
     {
+        if (string.IsNullOrWhiteSpace(App.Config.RelayUrl))
+        {
+            SetStatus(false, "Sadece Yerel Ağ (LAN) Modu - Relay yok");
+            return;
+        }
+
         await Task.Delay(5000);
         await ConnectToRelayAsync();
     }
@@ -1132,7 +1149,7 @@ public partial class MainWindow : Window
         TargetControlPanel.Visibility = Visibility.Collapsed;
         _targetMedia?.Dispose();
         _targetMedia = null;
-        _floatingWebcam?.Close();
+        _floatingWebcam?.ForceClose();
         _floatingWebcam = null;
         _targetTransferWindow?.Close();
         _targetTransferWindow = null;

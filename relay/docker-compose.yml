@@ -1,0 +1,56 @@
+# FluxConnect Relay — FluxHub sunucusunda izole çalıştırma
+#
+# TASARIM: Relay internete açık ve kimlik doğrulaması yok. Bu yüzden "ele
+# geçirildiğini varsay" prensibiyle kurulu — sunucunun geri kalanına HİÇBİR
+# erişimi yok:
+#   • Kendi ağı (fluxconnect_default). mssql_default / postgres_default /
+#     agents_default ağlarına BAĞLANMAZ → veritabanlarına ulaşamaz.
+#   • 127.0.0.1'e bind → dışarıya yalnızca Nginx üzerinden açılır.
+#   • Salt-okunur dosya sistemi, non-root, yetki yükseltme kapalı.
+#   • RAM/CPU tavanı → yanındaki uygulamaları (6 PM2 süreci + 3 DB) aç bırakamaz.
+#   • Log rotasyonu → sunucu diski dar (38 GB), log dosyası büyüyemez.
+
+services:
+  relay:
+    build: .
+    image: fluxconnect-relay:latest
+    container_name: fluxconnect-relay
+    restart: unless-stopped
+
+    # Yalnızca loopback — internete açılış Nginx (SSL + rate limit) üzerinden.
+    # Dış bacak 8765'i Nginx kullanıyor (kullanıcı tanıdık portu yazsın), bu yüzden
+    # container içeriden 18765'e bağlanır.
+    ports:
+      - "127.0.0.1:18765:8765"
+
+    env_file:
+      - .env
+
+    # ---- Kaynak tavanları ----
+    # Ölçüm (2026-08-14): boşta ~30 MB RAM. 256 MB bol bir tavan; kaçak bir
+    # bellek artışı container'ı öldürür, sunucuyu değil.
+    mem_limit: 256m
+    memswap_limit: 256m          # swap'e taşmasın (disk I/O ve şişme olmasın)
+    cpus: 1.0                    # 4 vCPU'nun 1'i
+    pids_limit: 128
+
+    # ---- Sertleştirme ----
+    read_only: true              # kök dosya sistemi salt-okunur
+    tmpfs:
+      - /tmp:size=16m,mode=1777  # gerekirse geçici alan, RAM'de ve küçük
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL                      # hiçbir Linux capability'sine ihtiyacı yok
+
+    # ---- Log rotasyonu (disk koruması) ----
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  # Varsayılan ağ İZOLE: sunucudaki diğer docker ağlarıyla bağlantısı yok.
+  default:
+    name: fluxconnect_default

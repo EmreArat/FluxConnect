@@ -3,9 +3,73 @@ import { Hub } from './hub';
 import { ClientToServerMessage } from './types';
 
 const RATE_LIMIT_PER_SECOND = parseInt(process.env.RATE_LIMIT_PER_SECOND ?? '10', 10);
+// Medya akışı (ekran/webcam) sürekli veri gönderir; kontrol mesajı limiti burada
+// işe yaramaz. Onun yerine SANİYEDE BAYT sınırı koyuyoruz — akış çalışır ama tek
+// istemci sunucunun bandını/CPU'sunu tüketemez. 0 = sınırsız (önerilmez).
+const RELAY_BYTES_PER_SECOND = parseInt(process.env.RELAY_BYTES_PER_SECOND ?? '3145728', 10); // 3 MB/sn
+/**
+ * TÜM relay trafiği için global tavan (bayt/sn).
+ *
+ * Bağlantı başına limit tek başına yetmez: 200 bağlantı × 3 MB/s = 600 MB/s,
+ * bu sunucunun kapasitesinin kat kat üstü. Global tavan, relay'in sunucunun
+ * hattını doldurup yanındaki uygulamaları (DB, web) aç bırakmasını engeller.
+ *
+ * Varsayılan 36 MB/s (~294 Mbit/s) = ölçülen gerçekçi kapasitenin (~420 Mbit/s,
+ * 2026-08-14 Falkenstein testi) %70'i. Kapasitesi farklı bir sunucuya taşınırsa
+ * bu değer yeniden ölçülüp güncellenmeli.
+ */
+const RELAY_TOTAL_BYTES_PER_SECOND = parseInt(process.env.RELAY_TOTAL_BYTES_PER_SECOND ?? '37748736', 10);
+// presence_subscribe ile takip edilebilecek azami ID (bellek koruması)
+const MAX_PRESENCE_IDS = parseInt(process.env.MAX_PRESENCE_IDS ?? '200', 10);
+
+/** Global bant sayacı — tüm bağlantılar ortak. */
+let globalBantPencere = Date.now();
+let globalBantSayac = 0;
+let globalBantUyari = false;
+
+/** Sağlık endpoint'i için anlık bant kullanımı (izleme). */
+export function bantDurumu() {
+    return {
+        bytesPerSecondNow: globalBantSayac,
+        bytesPerSecondLimit: RELAY_TOTAL_BYTES_PER_SECOND,
+        throttling: globalBantUyari,
+    };
+}
+
+function globalBantKontrol(bayt: number): boolean {
+    if (RELAY_TOTAL_BYTES_PER_SECOND <= 0) return true;
+    const now = Date.now();
+    if (now - globalBantPencere >= 1000) {
+        globalBantPencere = now;
+        globalBantSayac = 0;
+        globalBantUyari = false;
+    }
+    globalBantSayac += bayt;
+    if (globalBantSayac > RELAY_TOTAL_BYTES_PER_SECOND) {
+        if (!globalBantUyari) {
+            globalBantUyari = true;
+            console.warn(`[Relay] 🚦 GLOBAL bant tavanı aşıldı (${(RELAY_TOTAL_BYTES_PER_SECOND / 1048576).toFixed(0)} MB/s) — veri düşürülüyor.`);
+        }
+        return false;
+    }
+    return true;
+}
 
 // IP başına istek sayacı
 const ipRequestCount = new Map<string, { count: number; resetAt: number }>();
+
+/**
+ * Süresi geçmiş sayaç kayıtlarını temizler.
+ *
+ * Eskiden kayıtlar hiç silinmiyordu: her yeni IP kalıcı bir girdi bırakıyor,
+ * uzun süre çalışan süreçte Map sessizce büyüyordu (bellek sızıntısı).
+ */
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of ipRequestCount) {
+        if (entry.resetAt < now) ipRequestCount.delete(ip);
+    }
+}, 60_000).unref();
 
 function checkRateLimit(ip: string): boolean {
     const now = Date.now();
@@ -25,6 +89,10 @@ function checkRateLimit(ip: string): boolean {
 
 export class ClientHandler {
     private clientId?: string;
+    /** Bu bağlantının içinde bulunduğu saniyede aktardığı bayt (bant sınırı için). */
+    private bantPencereBaslangic = Date.now();
+    private bantSayac = 0;
+    private bantUyariVerildi = false;
 
     constructor(
         private ws: WebSocket,
@@ -38,10 +106,38 @@ export class ClientHandler {
         });
     }
 
+    /**
+     * Saniyede bayt sınırı. Aşılırsa `false` döner ve veri DÜŞÜRÜLÜR (bağlantı
+     * kapatılmaz — anlık tepe yapan normal bir akışı koparmak istemiyoruz).
+     */
+    private bantKontrol(bayt: number): boolean {
+        // Önce global tavan: sunucunun hattını hiçbir durumda doldurmasın.
+        if (!globalBantKontrol(bayt)) return false;
+        if (RELAY_BYTES_PER_SECOND <= 0) return true;
+        const now = Date.now();
+        if (now - this.bantPencereBaslangic >= 1000) {
+            this.bantPencereBaslangic = now;
+            this.bantSayac = 0;
+            this.bantUyariVerildi = false;
+        }
+        this.bantSayac += bayt;
+        if (this.bantSayac > RELAY_BYTES_PER_SECOND) {
+            if (!this.bantUyariVerildi) {
+                this.bantUyariVerildi = true;
+                console.warn(`[Client] 🚦 Bant sınırı aşıldı, veri düşürülüyor: ${this.clientId ?? this.ip}`);
+            }
+            return false;
+        }
+        return true;
+    }
+
     private onMessage(raw: WebSocket.RawData): void {
         const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer);
 
         if (buf.length >= 2 && buf[0] === 0xFC && buf[1] === 0x02) {
+            // Binary relay (ekran/webcam akışı) — kontrol mesajı limiti yerine
+            // bant sınırına tabi: akış sürer ama sunucuyu boğamaz.
+            if (!this.bantKontrol(buf.length)) return;
             this.handleBinaryRelay(buf);
             return;
         }
@@ -54,13 +150,17 @@ export class ClientHandler {
             return;
         }
 
-        // Rate limit kontrolü — medya/relay mesajlarına uygulanmaz
-        // (Webcam/ses sürekli akan veri gönderir, rate limit keser)
+        // Kontrol mesajları: saniyede istek sayısı sınırı.
+        // relay (medya akışı): istek sayısı yerine BANT sınırı — akış sürekli veri
+        // gönderir, sayı limiti akışı keserdi; ama tamamen sınırsız bırakmak da
+        // tek istemcinin sunucuyu boğmasına izin veriyordu.
         if (msg.type !== 'relay') {
             if (!checkRateLimit(this.ip)) {
                 this.send({ type: 'error', code: 'RATE_LIMITED', message: 'İstek limiti aşıldı.' });
                 return;
             }
+        } else if (!this.bantKontrol(buf.length)) {
+            return; // sessizce düşür — akışta hata mesajı spam'i istemiyoruz
         }
 
         this.dispatchMessage(msg);
@@ -354,15 +454,22 @@ export class ClientHandler {
     // ----------------------------------------------------------------
     // Presence (ÇevrimDurum)
     // ----------------------------------------------------------------
+    /** Liste boyutunu sınırla — sınırsız ID listesi bellek şişirme aracı olurdu. */
+    private kirpIdListesi(ids: unknown): string[] {
+        if (!Array.isArray(ids)) return [];
+        return ids.filter((x): x is string => typeof x === 'string').slice(0, MAX_PRESENCE_IDS);
+    }
+
     private handlePresenceSubscribe(ids: string[]): void {
         if (!this.clientId) {
             this.send({ type: 'error', code: 'NOT_REGISTERED', message: 'Önce kayıt olunmalı.' });
             return;
         }
-        this.hub.subscribePresence(this.clientId, ids);
+        const guvenli = this.kirpIdListesi(ids);
+        this.hub.subscribePresence(this.clientId, guvenli);
 
         // Hemen mevcut durumları gönder
-        const statuses = this.hub.queryPresence(ids);
+        const statuses = this.hub.queryPresence(guvenli);
         this.send({ type: 'presence_list', statuses });
     }
 
@@ -371,7 +478,7 @@ export class ClientHandler {
             this.send({ type: 'error', code: 'NOT_REGISTERED', message: 'Önce kayıt olunmalı.' });
             return;
         }
-        const statuses = this.hub.queryPresence(ids);
+        const statuses = this.hub.queryPresence(this.kirpIdListesi(ids));
         this.send({ type: 'presence_list', statuses });
     }
 

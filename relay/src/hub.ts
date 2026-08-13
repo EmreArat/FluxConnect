@@ -22,6 +22,8 @@ export interface ConnectedClient {
 const SESSION_TIMEOUT_MS = parseInt(process.env.SESSION_TIMEOUT_MS ?? '30000', 10);
 const MAX_PASSWORD_ATTEMPTS = parseInt(process.env.MAX_PASSWORD_ATTEMPTS ?? '5', 10);
 const BRUTE_FORCE_LOCK_MS = parseInt(process.env.BRUTE_FORCE_LOCK_MS ?? '30000', 10);
+/** Bir istemcinin toplamda takip edebileceği azami ID (bellek koruması). */
+const MAX_PRESENCE_SUBSCRIPTIONS = parseInt(process.env.MAX_PRESENCE_SUBSCRIPTIONS ?? '500', 10);
 
 export class Hub {
     private clients: Map<string, ConnectedClient> = new Map();
@@ -240,7 +242,9 @@ export class Hub {
     // Presence (ÇevrimDurum Takibi)
     // ----------------------------------------------------------------
 
-    /** Bir istemci, belirli ID'lerin durumunu takip etmek istiyor */
+    /** Bir istemci, belirli ID'lerin durumunu takip etmek istiyor.
+     *  Toplam abonelik SINIRLI: çağrı başına kırpma yetmiyor, arka arkaya
+     *  çağrılarla set sınırsız büyütülebilirdi. */
     subscribePresence(subscriberId: string, targetIds: string[]): void {
         let subs = this.presenceSubscriptions.get(subscriberId);
         if (!subs) {
@@ -248,6 +252,7 @@ export class Hub {
             this.presenceSubscriptions.set(subscriberId, subs);
         }
         for (const id of targetIds) {
+            if (subs.size >= MAX_PRESENCE_SUBSCRIPTIONS) break;
             subs.add(id);
         }
     }

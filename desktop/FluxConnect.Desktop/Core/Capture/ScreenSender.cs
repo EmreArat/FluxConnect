@@ -4,6 +4,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
+using FluxConnect.Desktop.Core.Security;
+
 namespace FluxConnect.Desktop.Core.Capture;
 
 /// <summary>
@@ -42,6 +44,18 @@ public class ScreenSender : IDisposable
 
     public void Start()
     {
+        _ = StartAfterHandshakeAsync();
+    }
+
+    private async Task StartAfterHandshakeAsync()
+    {
+        if (!await E2EContext.WaitReadyAsync(TimeSpan.FromSeconds(15)))
+        {
+            File.AppendAllText("flux_debug.txt",
+                $"[{DateTime.Now:HH:mm:ss}] [ScreenSender] E2E el sıkışması zaman aşımına uğradı.\n");
+            return;
+        }
+
         _epoch = 0;
         _ = SendScreenInfoAsync();
 
@@ -276,6 +290,7 @@ public class ScreenSender : IDisposable
     private async Task SendScreenFrameAsync(byte[] jpegBytes)
     {
         if (jpegBytes.Length == 0) return;
+        if (!E2EContext.IsReady) return;
 
         var sw = Stopwatch.StartNew();
         try

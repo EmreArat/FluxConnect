@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using FluxConnect.Desktop.Core.Security;
 
 namespace FluxConnect.Desktop.Core.Network;
 
@@ -10,6 +11,7 @@ namespace FluxConnect.Desktop.Core.Network;
 /// </summary>
 public class RelayClient : IDisposable
 {
+    private int _connectionGeneration;
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
     private bool _disposed;
@@ -30,8 +32,14 @@ public class RelayClient : IDisposable
 
     public async Task ConnectAsync(string relayUrl, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(relayUrl))
+            throw new ArgumentException("Relay adresi boş.", nameof(relayUrl));
+
         if (IsConnected) return;
 
+        await DisconnectAsync();
+
+        var generation = Interlocked.Increment(ref _connectionGeneration);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ws = new ClientWebSocket();
 
@@ -39,7 +47,7 @@ public class RelayClient : IDisposable
         {
             await _ws.ConnectAsync(new Uri(relayUrl), _cts.Token);
             OnConnected?.Invoke();
-            _ = ReceiveLoopAsync(_cts.Token);
+            _ = ReceiveLoopAsync(generation, _cts.Token);
         }
         catch (Exception)
         {
@@ -81,8 +89,23 @@ public class RelayClient : IDisposable
         if (RelayFrameCodec.TryPackFromLegacy(data, out var frameBytes))
         {
             var type = RelayFrameCodec.ClassifyLegacy(data) ?? RelayFrameType.LegacyText;
-            var wire = RelayWireCodec.PackInternet(sessionId, targetId, frameBytes);
+            if (!RelayFrameCodec.TryUnpack(frameBytes, out var unpacked))
+                return Task.CompletedTask;
+            var protectedBytes = E2EFrame.Protect(unpacked.Type, unpacked.Payload.Span, out _);
+            if (protectedBytes.Length == 0)
+                return Task.CompletedTask;
+            var wire = RelayWireCodec.PackInternet(sessionId, targetId, protectedBytes);
             _sendPipeline.EnqueueRelayWire(type, wire);
+            return Task.CompletedTask;
+        }
+
+        if (E2EContext.IsReady)
+        {
+            var protectedBytes = E2EFrame.Protect(RelayFrameType.LegacyText, Encoding.UTF8.GetBytes(data), out _);
+            if (protectedBytes.Length == 0)
+                return Task.CompletedTask;
+            var wire = RelayWireCodec.PackInternet(sessionId, targetId, protectedBytes);
+            _sendPipeline.EnqueueRelayWire(RelayFrameType.LegacyText, wire);
             return Task.CompletedTask;
         }
 
@@ -96,7 +119,9 @@ public class RelayClient : IDisposable
         if (_ws?.State != WebSocketState.Open)
             return Task.CompletedTask;
 
-        var frameBytes = RelayFrameCodec.Pack(type, payload);
+        var frameBytes = E2EFrame.Protect(type, payload, out _);
+        if (frameBytes.Length == 0)
+            return Task.CompletedTask;
         var wire = RelayWireCodec.PackInternet(sessionId, targetId, frameBytes);
         _sendPipeline.EnqueueRelayWire(type, wire);
         return Task.CompletedTask;
@@ -141,7 +166,7 @@ public class RelayClient : IDisposable
         }
     }
 
-    private async Task ReceiveLoopAsync(CancellationToken ct)
+    private async Task ReceiveLoopAsync(int generation, CancellationToken ct)
     {
         var buffer = new byte[1024 * 1024];
 
@@ -157,8 +182,11 @@ public class RelayClient : IDisposable
                     result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Kapatılıyor", ct);
-                        OnDisconnected?.Invoke();
+                        try
+                        {
+                            await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Kapatılıyor", ct);
+                        }
+                        catch { }
                         return;
                     }
                     ms.Write(buffer, 0, result.Count);
@@ -193,12 +221,14 @@ public class RelayClient : IDisposable
         }
         finally
         {
-            OnDisconnected?.Invoke();
+            if (generation == _connectionGeneration)
+                OnDisconnected?.Invoke();
         }
     }
 
     public async Task DisconnectAsync()
     {
+        Interlocked.Increment(ref _connectionGeneration);
         _cts?.Cancel();
         if (_ws?.State == WebSocketState.Open)
         {
@@ -208,6 +238,9 @@ public class RelayClient : IDisposable
             }
             catch { }
         }
+
+        _ws?.Dispose();
+        _ws = null;
     }
 
     public void Dispose()
