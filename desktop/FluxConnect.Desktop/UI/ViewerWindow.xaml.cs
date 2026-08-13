@@ -20,6 +20,7 @@ public partial class ViewerWindow : Window
     private FloatingTransferWindow? _transferWindow;
     private bool _isClosing = false;
     private bool _forceClose = false;
+    private bool _sessionAlreadyEnded = false;
     private int _isProcessingFrame = 0;
     private int _isProcessingWebcam = 0;
 
@@ -99,11 +100,19 @@ public partial class ViewerWindow : Window
                 App.Session.OnSessionRejected -= OnSessionClosed;
             }
 
-            // Karşı tarafa kapatma komutunu gittiğinden emin olmak için await kullanıyoruz
-            await App.Session.EndCurrentSessionAsync();
-            
-            // İşlem bittikten sonra gerçekten kapat
-            this.Close();
+            if (!_sessionAlreadyEnded)
+            {
+                try
+                {
+                    await App.Session.EndCurrentSessionAsync();
+                }
+                catch
+                {
+                    // Ana uygulama ayakta kalsın
+                }
+            }
+
+            Close();
         };
     }
 
@@ -291,9 +300,7 @@ public partial class ViewerWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
-            MessageBox.Show("LAN bağlantısı kesildi.", "Bilgi",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            Close();
+            CloseViewerAfterRemoteEnd("LAN bağlantısı kesildi.");
         });
     }
 
@@ -562,11 +569,17 @@ public partial class ViewerWindow : Window
         {
             App.Session.OnRelayData -= OnDataReceived;
             App.Session.OnSessionRejected -= OnSessionClosed;
-
-            MessageBox.Show($"Oturum kapatıldı: {reason}", "Bilgi",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            Close();
+            CloseViewerAfterRemoteEnd($"Oturum kapatıldı: {reason}");
         });
+    }
+
+    private void CloseViewerAfterRemoteEnd(string message)
+    {
+        if (_isClosing) return;
+        _sessionAlreadyEnded = true;
+        _forceClose = true;
+        MessageBox.Show(message, "Bilgi", MessageBoxButton.OK, MessageBoxImage.Information);
+        Close();
     }
 
     private void BtnEndSession_Click(object sender, RoutedEventArgs e)

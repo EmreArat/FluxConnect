@@ -35,7 +35,7 @@ public partial class UpdateAvailableDialog : Window
         {
             var path = await UpdateService.DownloadUpdateAsync(_info, new Progress<double>(p => Progress.Value = p * 100));
             ResultMessage = "Güncelleme indirildi, uygulama yeniden başlatılıyor...";
-            UpdateService.ApplyUpdateAndRestart(path);
+            UpdateService.ApplyUpdateAndRestart(path, _info.Version);
         }
         catch (Exception ex)
         {

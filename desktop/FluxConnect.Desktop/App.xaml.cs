@@ -24,8 +24,11 @@ public partial class App : Application
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        // Diyalog / izleyici kapanınca süreç bitmesin; çıkış yalnızca tepsi menüsünden.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
         Config = ConfigManager.Load();
-        StartupHelper.SetEnabled(Config.StartWithWindows);
+        StartupHelper.ConfigureStartup(Config.StartWithWindows, Config.StartMinimizedToTray);
 
         Relay = new RelayClient();
         Session = new SessionManager(Relay, Config);
@@ -44,35 +47,67 @@ public partial class App : Application
 
         Tray = new TrayService();
         MainWindowInstance = new MainWindow();
+        MainWindow = MainWindowInstance;
         Tray.Attach(MainWindowInstance);
         MainWindowInstance.Closed += (_, _) => { MainWindowInstance = null; };
 
-        if (Config.StartMinimizedToTray)
+        var launchedMinimized = e.Args.Any(arg =>
+            arg.Equals(StartupHelper.MinimizedArg, StringComparison.OrdinalIgnoreCase));
+        var updatedVersion = ParseUpdatedVersion(e.Args);
+
+        // Tepsiye küçültme yalnızca Windows başlangıcında (--minimized) geçerli;
+        // exe'ye çift tıklayınca ana pencere açılır.
+        // Hide() öncesi Show() gerekir; aksi halde pencere Application.Windows'a girmez.
+        MainWindowInstance.Show();
+        if (Config.StartMinimizedToTray && launchedMinimized)
         {
             MainWindowInstance.Hide();
-        }
-        else
-        {
-            MainWindowInstance.Show();
+            if (updatedVersion == null)
+            {
+                Tray.ShowBalloon(
+                    "FluxConnect",
+                    "Uygulama tepside çalışıyor. Açmak için simgeye çift tıklayın.");
+            }
         }
 
-        _ = CheckForUpdatesSilentlyAsync();
+        if (updatedVersion != null)
+        {
+            Tray.ShowBalloon(
+                "FluxConnect",
+                $"v{updatedVersion} sürümüne güncellendi.",
+                8000);
+        }
+
+        _ = CheckAndApplyUpdatesSilentlyAsync(launchedMinimized);
     }
 
-    private static async Task CheckForUpdatesSilentlyAsync()
+    private static string? ParseUpdatedVersion(string[] args)
+    {
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (!args[i].Equals(UpdateService.UpdatedArg, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                return args[i + 1].TrimStart('v', 'V');
+
+            return UpdateService.CurrentVersion;
+        }
+
+        return null;
+    }
+
+    private static async Task CheckAndApplyUpdatesSilentlyAsync(bool restartMinimized)
     {
         try
         {
             await Task.Delay(3000);
-            var info = await UpdateService.CheckForUpdateAsync(GitHubRepo);
-            if (info == null) return;
-
-            await Current.Dispatcher.InvokeAsync(() =>
-            {
-                Tray.ShowBalloon("FluxConnect Güncelleme", $"v{info.Version} mevcut. Ayarlar'dan güncelleyebilirsiniz.");
-            });
+            await AutoUpdateCoordinator.EnsureStartedAsync(GitHubRepo, restartMinimized);
         }
-        catch { }
+        catch
+        {
+            // Kontrol/indirme hataları sessiz; bildirim yalnızca başarılı güncelleme sonrası.
+        }
     }
 
     protected override async void OnExit(ExitEventArgs e)

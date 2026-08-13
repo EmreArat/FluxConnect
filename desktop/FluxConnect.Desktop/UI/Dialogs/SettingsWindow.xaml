@@ -88,6 +88,12 @@
                            FontSize="12"
                            Margin="0,0,0,8"/>
 
+                <TextBlock Text="Açılışta otomatik kontrol edilir; güncelleme varsa arka planda uygulanır."
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,8"/>
+
                 <Button x:Name="BtnCheckUpdate"
                         Content="Güncellemeleri kontrol et"
                         Style="{StaticResource SecondaryButton}"

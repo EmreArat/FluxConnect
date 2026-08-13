@@ -59,7 +59,7 @@ public partial class MainWindow : Window
         dialog.ShowDialog();
     }
 
-    private void ExitApplication()
+    public void RequestExit()
     {
         _isExiting = true;
         Application.Current.Shutdown();
@@ -211,8 +211,6 @@ public partial class MainWindow : Window
                         _ => $"Bağlantı sonlandı: {reason}",
                     };
                     _connectPasswordDialog.CloseRejected(rejectMsg);
-                    _connectPasswordDialog = null;
-                    _pendingPasswordSessionId = null;
                 }
 
                 if (TargetControlPanel.Visibility == Visibility.Visible)
@@ -325,21 +323,44 @@ public partial class MainWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterScreen
         };
 
+        var dialog = _connectPasswordDialog;
         var capturedClient = lanClient;
         var capturedSession = sessionId;
-        _connectPasswordDialog.Closed += async (_, _) =>
+        dialog.Closed += async (_, _) =>
         {
-            if (_connectPasswordDialog?.SubmittedPasswordHash is { } hash)
+            if (ReferenceEquals(_connectPasswordDialog, dialog))
+                _connectPasswordDialog = null;
+            _pendingPasswordSessionId = null;
+
+            if (dialog.SubmittedPasswordHash is { } hash)
             {
                 if (capturedClient != null)
                     await _session.SendLanPasswordAttemptAsync(capturedClient, hash);
                 else if (capturedSession != "lan_pending")
                     await _session.SendPasswordAttemptAsync(capturedSession, hash);
+                return;
             }
-            _connectPasswordDialog = null;
+
+            if (_session.CurrentSession == null)
+                BtnConnect.IsEnabled = true;
         };
 
-        _connectPasswordDialog.Show();
+        dialog.Show();
+    }
+
+    private void AttachViewer(ViewerWindow viewer)
+    {
+        viewer.Closed += (_, _) =>
+        {
+            if (_isExiting) return;
+            BtnConnect.IsEnabled = true;
+            if (!IsVisible)
+            {
+                Show();
+                WindowState = WindowState.Normal;
+            }
+            Activate();
+        };
     }
 
     // ----------------------------------------------------------------
@@ -353,6 +374,7 @@ public partial class MainWindow : Window
         if (session.Role == SessionRole.Requester)
         {
             var viewer = new ViewerWindow(session);
+            AttachViewer(viewer);
             viewer.Show();
         }
         else if (session.Role == SessionRole.Target)
@@ -605,10 +627,12 @@ public partial class MainWindow : Window
                                 DirectClient = client
                             };
                             var viewer = new ViewerWindow(session);
+                            AttachViewer(viewer);
                             viewer.Show();
                             break;
 
                         case "connect_rejected":
+                            _connectPasswordDialog?.CloseRejected("Bağlantı reddedildi.");
                             ShowConnectMessage("Bağlantı reddedildi.", isError: true);
                             BtnConnect.IsEnabled = true;
                             client.Dispose();

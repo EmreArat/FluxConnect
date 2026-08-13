@@ -32,9 +32,9 @@ public sealed class TrayService : IDisposable
 
     public void Attach(MainWindow mainWindow) => _mainWindow = mainWindow;
 
-    public void ShowBalloon(string title, string message)
+    public void ShowBalloon(string title, string message, int timeoutMs = 4000)
     {
-        _icon.ShowBalloonTip(4000, title, message, ToolTipIcon.Info);
+        _icon.ShowBalloonTip(timeoutMs, title, message, ToolTipIcon.Info);
     }
 
     public void ShowMainWindow()
@@ -56,10 +56,13 @@ public sealed class TrayService : IDisposable
 
     public void ExitApplication()
     {
-        _mainWindow?.Dispatcher.Invoke(() =>
+        if (_mainWindow != null)
         {
-            Application.Current.Shutdown();
-        });
+            _mainWindow.Dispatcher.Invoke(() => _mainWindow.RequestExit());
+            return;
+        }
+
+        Application.Current.Shutdown();
     }
 
     public void Dispose()
@@ -78,6 +81,18 @@ public sealed class TrayService : IDisposable
             var stream = Application.GetResourceStream(uri)?.Stream;
             if (stream != null)
                 return new Icon(stream);
+        }
+        catch { }
+
+        try
+        {
+            var exePath = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                var extracted = Icon.ExtractAssociatedIcon(exePath);
+                if (extracted != null)
+                    return extracted;
+            }
         }
         catch { }
 

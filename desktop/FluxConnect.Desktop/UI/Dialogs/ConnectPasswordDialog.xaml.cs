@@ -20,14 +20,14 @@ public partial class ConnectPasswordDialog : Window
 
     public void CloseSuccess()
     {
-        DialogResult = true;
+        if (!IsVisible) return;
         Close();
     }
 
     public void CloseRejected(string reason)
     {
+        if (!IsVisible) return;
         SetStatus(reason, true);
-        DialogResult = false;
         Close();
     }
 
@@ -40,13 +40,11 @@ public partial class ConnectPasswordDialog : Window
         }
 
         SubmittedPasswordHash = PasswordHelper.Hash(TxtPassword.Password);
-        DialogResult = true;
         Close();
     }
 
     private void BtnClose_Click(object sender, RoutedEventArgs e)
     {
-        DialogResult = false;
         Close();
     }
 }

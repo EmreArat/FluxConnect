@@ -4,6 +4,8 @@ namespace FluxConnect.Desktop.Core.Platform;
 
 public static class StartupHelper
 {
+    public const string MinimizedArg = "--minimized";
+
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string AppName = "FluxConnect";
 
@@ -20,7 +22,7 @@ public static class StartupHelper
         }
     }
 
-    public static void SetEnabled(bool enabled)
+    public static void ConfigureStartup(bool enabled, bool startMinimized)
     {
         try
         {
@@ -32,7 +34,11 @@ public static class StartupHelper
                 var exePath = Environment.ProcessPath;
                 if (string.IsNullOrEmpty(exePath))
                     return;
-                key.SetValue(AppName, $"\"{exePath}\"");
+
+                var command = startMinimized
+                    ? $"\"{exePath}\" {MinimizedArg}"
+                    : $"\"{exePath}\"";
+                key.SetValue(AppName, command);
             }
             else
             {

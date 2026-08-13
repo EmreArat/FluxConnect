@@ -55,7 +55,7 @@ public partial class SettingsWindow : Window
         }
 
         ConfigManager.Save(config);
-        StartupHelper.SetEnabled(config.StartWithWindows);
+        StartupHelper.ConfigureStartup(config.StartWithWindows, config.StartMinimizedToTray);
 
         _ = App.Session.RefreshRegistrationAsync();
 
@@ -66,19 +66,13 @@ public partial class SettingsWindow : Window
     private async void BtnCheckUpdate_Click(object sender, RoutedEventArgs e)
     {
         BtnCheckUpdate.IsEnabled = false;
-        TxtUpdateStatus.Text = "Kontrol ediliyor...";
+        TxtUpdateStatus.Text = AutoUpdateCoordinator.IsRunning
+            ? "Güncelleme arka planda sürüyor..."
+            : "Kontrol ediliyor...";
         try
         {
-            var info = await UpdateService.CheckForUpdateAsync(App.GitHubRepo);
-            if (info == null)
-            {
-                TxtUpdateStatus.Text = "Güncel sürümdesiniz.";
-                return;
-            }
-
-            var dialog = new UpdateAvailableDialog(info) { Owner = this };
-            dialog.ShowDialog();
-            TxtUpdateStatus.Text = dialog.ResultMessage;
+            var result = await AutoUpdateCoordinator.EnsureStartedAsync(App.GitHubRepo, restartMinimized: false);
+            TxtUpdateStatus.Text = result.Message;
         }
         catch (Exception ex)
         {

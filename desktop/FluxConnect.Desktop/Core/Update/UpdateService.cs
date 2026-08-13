@@ -18,14 +18,22 @@ public sealed class UpdateInfo
 
 public static class UpdateService
 {
-    private static readonly HttpClient Http = new()
-    {
-        Timeout = TimeSpan.FromSeconds(30),
-        DefaultRequestHeaders = { { "User-Agent", "FluxConnect-Updater" } }
-    };
+    public const string UpdatedArg = "--updated";
+
+    private static readonly HttpClient Http = CreateClient(TimeSpan.FromSeconds(30), api: true);
+    private static readonly HttpClient DownloadHttp = CreateClient(TimeSpan.FromMinutes(10), api: false);
 
     public static string CurrentVersion =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+
+    private static HttpClient CreateClient(TimeSpan timeout, bool api)
+    {
+        var client = new HttpClient { Timeout = timeout };
+        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "FluxConnect-Updater");
+        if (api)
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/vnd.github+json");
+        return client;
+    }
 
     public static async Task<UpdateInfo?> CheckForUpdateAsync(string githubRepo, CancellationToken ct = default)
     {
@@ -70,8 +78,10 @@ public static class UpdateService
         Directory.CreateDirectory(dir);
 
         var targetPath = Path.Combine(dir, $"FluxConnect-{info.Version}.exe");
+        if (File.Exists(targetPath) && new FileInfo(targetPath).Length > 100_000)
+            return targetPath;
 
-        using var response = await Http.GetAsync(info.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var response = await DownloadHttp.GetAsync(info.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
 
         var total = response.Content.Headers.ContentLength ?? -1;
@@ -103,7 +113,7 @@ public static class UpdateService
         return targetPath;
     }
 
-    public static void ApplyUpdateAndRestart(string downloadedExePath)
+    public static void ApplyUpdateAndRestart(string downloadedExePath, string version, bool restartMinimized = false)
     {
         var currentExe = Environment.ProcessPath
             ?? throw new InvalidOperationException("Geçerli uygulama yolu bulunamadı.");
@@ -112,11 +122,24 @@ public static class UpdateService
             Path.GetTempPath(),
             $"fluxconnect-update-{Guid.NewGuid():N}.cmd");
 
+        var restartArgs = restartMinimized
+            ? $"{UpdatedArg} {version} --minimized"
+            : $"{UpdatedArg} {version}";
+
         var batch = $"""
             @echo off
-            timeout /t 2 /nobreak > nul
-            copy /Y "{downloadedExePath}" "{currentExe}"
-            start "" "{currentExe}"
+            setlocal
+            set /a n=0
+            :retry
+            ping 127.0.0.1 -n 3 > nul
+            copy /Y "{downloadedExePath}" "{currentExe}" > nul
+            if not errorlevel 1 goto ok
+            set /a n+=1
+            if %n% lss 10 goto retry
+            exit /b 1
+            :ok
+            start "" "{currentExe}" {restartArgs}
+            del /q "{downloadedExePath}" > nul 2>&1
             del "%~f0"
             """;
 
@@ -128,7 +151,10 @@ public static class UpdateService
             UseShellExecute = false
         });
 
-        System.Windows.Application.Current.Shutdown();
+        if (System.Windows.Application.Current.MainWindow is FluxConnect.Desktop.UI.MainWindow mainWindow)
+            mainWindow.RequestExit();
+        else
+            System.Windows.Application.Current.Shutdown();
     }
 
     private static bool IsNewer(string latest, string current)

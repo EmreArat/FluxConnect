@@ -9,8 +9,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>FluxConnect</AssemblyName>
     <RootNamespace>FluxConnect.Desktop</RootNamespace>
-    <Version>0.2.1</Version>
-    <AssemblyVersion>0.2.1.0</AssemblyVersion>
+    <Version>0.2.2</Version>
+    <AssemblyVersion>0.2.2.0</AssemblyVersion>
     <!-- Portable: Tek .exe, .NET runtime dahil -->
     <!-- Boyut optimizasyonları ve Taşıma Türü(Framework Dependent, Sıkıştırılmış) -->
     <PublishSingleFile>true</PublishSingleFile>
