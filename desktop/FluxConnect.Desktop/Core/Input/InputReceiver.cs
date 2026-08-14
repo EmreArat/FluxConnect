@@ -10,7 +10,7 @@ public static class InputReceiver
 {
     /// <summary>
     /// Relay üzerinden gelen base64 JSON verisini ayrıştırır ve gereğini yapar.
-    /// Format: { "t": "mm"|"mk"|"ks"|"ku", ... }
+    /// Format: { "t": "mm"|"mc"|"mdc"|"mw"|"kd"|"ku"|"kc"|"kx"|"krel"|"scr", ... }
     /// </summary>
     public static void Handle(string base64Data)
     {
@@ -66,10 +66,21 @@ public static class InputReceiver
                     InputSimulator.KeyUp((ushort)root.GetProperty("k").GetInt32());
                     break;
 
-                // Karakter gönder
+                // Metin gönder (Unicode, klavye düzeninden bağımsız)
                 case "kc":
                     var ch = root.GetProperty("c").GetString();
-                    if (ch?.Length == 1) InputSimulator.SendChar(ch[0]);
+                    if (!string.IsNullOrEmpty(ch)) InputSimulator.SendText(ch);
+                    break;
+
+                // Tuş + modifier kombinasyonu, bas-bırak tek seferde
+                case "kx":
+                    var comboMods = root.TryGetProperty("m", out var modProp) ? modProp.GetInt32() : 0;
+                    InputSimulator.SendCombo((ushort)root.GetProperty("k").GetInt32(), comboMods);
+                    break;
+
+                // Basılı kalmış modifier'ları temizle
+                case "krel":
+                    InputSimulator.ReleaseModifiers();
                     break;
 
                 // Ekran değiştir ("scr" = screen)

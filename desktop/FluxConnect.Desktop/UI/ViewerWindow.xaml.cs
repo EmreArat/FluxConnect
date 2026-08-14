@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using FluxConnect.Desktop.Core.Session;
+using FluxConnect.Desktop.Core.Input;
 using FluxConnect.Desktop.Core.Media;
 using FluxConnect.Desktop.UI.Helpers;
 using Brush = System.Windows.Media.Brush;
@@ -337,16 +338,72 @@ public partial class ViewerWindow : Window
             // Farenin uzak ekran üzerinde olup olmadığını kontrol edebiliriz
             // ama Viewer penceresindeyken tuşların iletilmesi genellikle yeterlidir.
             e.Handled = true;
-            SendInput(new { t = "kd", k = KeyInterop.VirtualKeyFromKey(e.Key) });
+            SendKeyStroke(e.Key == Key.System ? e.SystemKey : e.Key);
         };
 
+        // Tuş bırakma iletilmiyor: bas-bırak karşıya tek parça gidiyor.
         this.PreviewKeyUp += (_, e) =>
         {
             if (e.OriginalSource is System.Windows.Controls.TextBox) return;
             e.Handled = true;
-            SendInput(new { t = "ku", k = KeyInterop.VirtualKeyFromKey(e.Key) });
         };
+
+        // Odak kaybında karşı tarafta modifier basılı kalmasın
+        this.Deactivated += (_, _) => SendInput(new { t = "krel" });
     }
+
+    /// <summary>
+    /// Tuşu karşı tarafa iletir. Yazı üreten tuşlar Unicode metin olarak,
+    /// kısayollar ve kontrol tuşları tuş kodu olarak gönderilir.
+    /// </summary>
+    private void SendKeyStroke(Key key)
+    {
+        if (IsModifierKey(key) || key == Key.CapsLock || key == Key.NumLock || key == Key.Scroll)
+            return;
+
+        var vk = KeyInterop.VirtualKeyFromKey(key);
+        if (vk == 0) return;
+
+        // Türkçe klavyede AltGr, Windows tarafından Ctrl+Alt olarak raporlanır.
+        // Bunu kısayol sanıp iletirsek karşı tarafta Ctrl basılı kalır.
+        var isAltGr = Keyboard.IsKeyDown(Key.RightAlt);
+        var mods = Keyboard.Modifiers;
+
+        var modifiers = 0;
+        if (!isAltGr && mods.HasFlag(ModifierKeys.Control)) modifiers |= InputSimulator.MOD_CTRL;
+        if (!isAltGr && mods.HasFlag(ModifierKeys.Alt)) modifiers |= InputSimulator.MOD_ALT;
+        if (mods.HasFlag(ModifierKeys.Shift)) modifiers |= InputSimulator.MOD_SHIFT;
+        if (Keyboard.IsKeyDown(Key.LWin) || Keyboard.IsKeyDown(Key.RWin)) modifiers |= InputSimulator.MOD_WIN;
+
+        var isShortcut = (modifiers & ~InputSimulator.MOD_SHIFT) != 0;
+
+        if (!isShortcut && !IsControlKey(key))
+        {
+            var text = KeyboardTranslator.TryGetText(vk);
+            if (!string.IsNullOrEmpty(text))
+            {
+                SendInput(new { t = "kc", c = text });
+                return;
+            }
+        }
+
+        SendInput(new { t = "kx", k = vk, m = modifiers });
+    }
+
+    private static bool IsModifierKey(Key key) => key
+        is Key.LeftCtrl or Key.RightCtrl
+        or Key.LeftAlt or Key.RightAlt
+        or Key.LeftShift or Key.RightShift
+        or Key.LWin or Key.RWin;
+
+    /// <summary>Yazı üretmeyen, tuş kodu olarak gitmesi gereken tuşlar.</summary>
+    private static bool IsControlKey(Key key) => key
+        is Key.Enter or Key.Tab or Key.Back or Key.Escape
+        or Key.Delete or Key.Insert
+        or Key.Left or Key.Right or Key.Up or Key.Down
+        or Key.Home or Key.End or Key.PageUp or Key.PageDown
+        or Key.Apps or Key.PrintScreen or Key.Pause
+        || (key >= Key.F1 && key <= Key.F24);
 
     private static string ButtonName(MouseButton btn) => btn switch
     {
@@ -530,6 +587,9 @@ public partial class ViewerWindow : Window
         if (_isClosing) return;
         _isClosing = true;
         _forceClose = true;
+
+        // Karşı tarafta basılı kalmış modifier varsa temizle
+        SendInput(new { t = "krel" });
 
         if (_session.IsLanMode && _session.DirectClient != null)
         {
