@@ -44,9 +44,11 @@ public class SavedContact
     public bool IsRelayContact =>
         Address.Length == 9 && Address.All(char.IsDigit);
 
+    /// <summary>Makine ID yoksa veya yalnızca LAN ile tanınıyorsa true.</summary>
     public bool IsLanContact =>
-        !string.IsNullOrEmpty(HardwareId) ||
-        Address.StartsWith("hw:", StringComparison.OrdinalIgnoreCase);
+        !IsRelayContact && (
+            !string.IsNullOrEmpty(HardwareId) ||
+            Address.StartsWith("hw:", StringComparison.OrdinalIgnoreCase));
 }
 
 public class AppConfig
@@ -82,6 +84,13 @@ public class AppConfig
 
     [JsonPropertyName("relay_url")]
     public string RelayUrl { get; set; } = "ws://localhost:8765";
+
+    /// <summary>
+    /// Relay sertifikasının SHA-256 parmak izi (ayraçsız hex). Doluysa yalnızca bu
+    /// sertifikaya sahip sunucuya bağlanılır; kendinden imzalı sertifikalar için gerekir.
+    /// </summary>
+    [JsonPropertyName("relay_cert_fingerprint")]
+    public string? RelayCertFingerprint { get; set; }
 
     [JsonPropertyName("brand")]
     public BrandConfig Brand { get; set; } = new();

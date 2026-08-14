@@ -59,9 +59,28 @@ public partial class MainWindow : Window
         dialog.ShowDialog();
     }
 
+    /// <summary>Ayarlar kaydı sonrası relay yeniden bağlanırken durum satırını günceller.</summary>
+    public void NotifyRelayReconnecting()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            SetStatus(false, "Relay'e bağlanıyor...");
+            ClearConnectMessage();
+        });
+    }
+
     public void RequestExit()
     {
+        if (_isExiting) return;
         _isExiting = true;
+
+        try
+        {
+            // Aktif oturumu bırak; çıkışı ağ kapanmasına bağlamamak için fire-and-forget
+            _ = App.Session.EndCurrentSessionAsync();
+        }
+        catch { }
+
         Application.Current.Shutdown();
     }
 
@@ -85,8 +104,7 @@ public partial class MainWindow : Window
         TxtDisplayName.Text = config.DisplayName;
         Title = $"FluxConnect — {config.MachineId}";
 
-        // TxtLocalIp'ye port numarasını dahil etmeden sadece IP'yi yazdırıyoruz
-        TxtLocalIp.Text = $"Sizin IP adresiniz: {App.LanServer.GetLocalIpAddress()}";
+        // TxtLocalIp satırı kaldırıldı — bağlantı Makine ID ile yürür.
 
         // Kişi listesini oluştur
         SetActiveContactTab(false);
@@ -149,15 +167,18 @@ public partial class MainWindow : Window
             Dispatcher.Invoke(() =>
             {
                 SetStatus(true, "Bağlı — Hazır");
+                ClearConnectMessage();
 
                 var contactIds = App.Config.Contacts
-                    .Where(c => c.Address.Length == 9 && c.Address.All(char.IsDigit))
+                    .Where(c => c.IsRelayContact)
                     .Select(c => c.Address).ToArray();
                 
                 if (contactIds.Length > 0)
                 {
                     _ = _session.SubscribePresenceAsync(contactIds);
                 }
+
+                BuildContactsList();
             });
 
         _session.OnRelayDisconnected += () =>
@@ -754,6 +775,12 @@ public partial class MainWindow : Window
         TxtConnectMessage.Visibility = Visibility.Visible;
     }
 
+    private void ClearConnectMessage()
+    {
+        TxtConnectMessage.Text = string.Empty;
+        TxtConnectMessage.Visibility = Visibility.Collapsed;
+    }
+
     private static string FormatId(string id)
     {
         if (id.Length != 9) return id;
@@ -835,13 +862,8 @@ public partial class MainWindow : Window
         if (contact.IsRelayContact)
             return FormatId(contact.Address);
 
-        if (!string.IsNullOrEmpty(contact.HardwareId))
-            return $"GUID: {HardwareIdProvider.FormatDisplay(contact.HardwareId)}";
-
-        if (contact.Address.StartsWith("hw:", StringComparison.OrdinalIgnoreCase))
-            return contact.Address;
-
-        return contact.Address;
+        // Makine ID henüz bilinmiyorsa IP/GUID gösterme
+        return string.Empty;
     }
 
     private static bool ContactsMatch(SavedContact a, SavedContact b)
@@ -981,7 +1003,8 @@ public partial class MainWindow : Window
             FontSize = 9,
             Foreground = (Brush)FindResource("TextMutedBrush"),
             TextTrimming = TextTrimming.CharacterEllipsis,
-            Margin = new Thickness(0, 1, 0, 0)
+            Margin = new Thickness(0, 1, 0, 0),
+            Visibility = string.IsNullOrEmpty(subtitle) ? Visibility.Collapsed : Visibility.Visible
         };
 
         nameBlock.Children.Add(titleRow);

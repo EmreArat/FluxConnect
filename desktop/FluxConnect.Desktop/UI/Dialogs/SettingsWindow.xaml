@@ -4,7 +4,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:controls="clr-namespace:FluxConnect.Desktop.UI.Controls"
         Title="Ayarlar"
-        Height="580" Width="460"
+        Height="520" Width="600"
         ResizeMode="NoResize"
         WindowStyle="None"
         WindowStartupLocation="CenterOwner"
@@ -32,98 +32,136 @@
                                  ShowMinimize="False"
                                  ShowMaximize="False"/>
 
-        <ScrollViewer Grid.Row="1" Style="{StaticResource ModernScrollViewer}" Margin="24,16,24,8">
-            <StackPanel>
-                <TextBlock Text="GENEL"
-                           Foreground="{StaticResource TextMutedBrush}"
-                           FontSize="10"
-                           FontWeight="SemiBold"
-                           Margin="0,0,0,8"/>
+        <StackPanel Grid.Row="1" Margin="24,16,24,8">
+            <TextBlock Text="GENEL"
+                       Foreground="{StaticResource TextMutedBrush}"
+                       FontSize="10"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+
+            <Grid Margin="0,0,0,18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
 
                 <CheckBox x:Name="ChkStartWithWindows"
+                          Grid.Column="0"
                           Content="Windows ile birlikte başlat"
-                          Foreground="{StaticResource TextPrimaryBrush}"
-                          Margin="0,0,0,8"/>
+                          Foreground="{StaticResource TextPrimaryBrush}"/>
 
                 <CheckBox x:Name="ChkStartMinimizedToTray"
+                          Grid.Column="1"
                           Content="Başlangıçta tepsiye küçült"
-                          Foreground="{StaticResource TextPrimaryBrush}"
-                          Margin="0,0,0,20"/>
+                          Foreground="{StaticResource TextPrimaryBrush}"/>
+            </Grid>
 
-                <TextBlock Text="RELAY SUNUCUSU"
-                           Foreground="{StaticResource TextMutedBrush}"
-                           FontSize="10"
-                           FontWeight="SemiBold"
-                           Margin="0,0,0,8"/>
+            <TextBlock Text="RELAY SUNUCUSU"
+                       Foreground="{StaticResource TextMutedBrush}"
+                       FontSize="10"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
 
-                <TextBlock Text="Internet üzerinden ID ile bağlanmak için kendi relay adresinizi girin. Karşı tarafın da aynı adresi kullanması gerekir. Boş bırakılırsa yalnızca LAN çalışır."
+            <TextBlock Text="Sunucu adresi"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       FontSize="11"
+                       Margin="0,0,0,4"/>
+
+            <TextBox x:Name="TxtRelayUrl"
+                     Style="{StaticResource ModernTextBox}"
+                     Padding="12,7"
+                     Margin="0,0,0,10"
+                     ToolTip="Örnek: wss://relay.ornek.com:8765&#10;Karşı tarafın da aynı adresi kullanması gerekir. Boş bırakılırsa yalnızca LAN çalışır."/>
+
+            <TextBlock Text="Sertifika parmak izi (SHA-256) — kendinden imzalı sertifika için"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       FontSize="11"
+                       Margin="0,0,0,4"/>
+
+            <TextBox x:Name="TxtRelayFingerprint"
+                     Style="{StaticResource ModernTextBox}"
+                     Padding="12,7"
+                     FontSize="12"
+                     Margin="0,0,0,18"
+                     ToolTip="Örnek: 08:A7:0B:BF:21:52:03:9B:...&#10;Doluysa yalnızca bu sertifikaya sahip sunucuya bağlanılır. Geçerli sertifikanız varsa boş bırakın."/>
+
+            <TextBlock Text="OTURUM ŞİFRESİ (OPSİYONEL)"
+                       Foreground="{StaticResource TextMutedBrush}"
+                       FontSize="10"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0"
+                           Text="Şifre"
                            Foreground="{StaticResource TextSecondaryBrush}"
                            FontSize="11"
-                           TextWrapping="Wrap"
-                           Margin="0,0,0,8"/>
+                           Margin="0,0,0,4"/>
 
-                <TextBox x:Name="TxtRelayUrl"
-                         Style="{StaticResource ModernTextBox}"
-                         Height="36"
-                         Margin="0,0,0,20"
-                         ToolTip="Örnek: wss://relay.ornek.com:8765"/>
-
-                <TextBlock Text="OTURUM ŞİFRESİ (OPSİYONEL)"
-                           Foreground="{StaticResource TextMutedBrush}"
-                           FontSize="10"
-                           FontWeight="SemiBold"
-                           Margin="0,0,0,8"/>
-
-                <TextBlock Text="Boş bırakılırsa şifre gerekmez. Doğru şifre, manuel kabul alternatifidir."
+                <TextBlock Grid.Row="0" Grid.Column="2"
+                           Text="Şifre (tekrar)"
                            Foreground="{StaticResource TextSecondaryBrush}"
                            FontSize="11"
-                           TextWrapping="Wrap"
-                           Margin="0,0,0,8"/>
+                           Margin="0,0,0,4"/>
 
                 <PasswordBox x:Name="TxtSessionPassword"
-                             Height="36"
-                             Margin="0,0,0,6"
-                             Padding="8,6"/>
+                             Grid.Row="1" Grid.Column="0"
+                             Height="34"
+                             Padding="8,6"
+                             ToolTip="Boş bırakılırsa şifre gerekmez. Doğru şifre, manuel kabul alternatifidir."/>
 
                 <PasswordBox x:Name="TxtSessionPasswordConfirm"
-                             Height="36"
-                             Margin="0,0,0,8"
+                             Grid.Row="1" Grid.Column="2"
+                             Height="34"
                              Padding="8,6"/>
+            </Grid>
 
-                <CheckBox x:Name="ChkClearPassword"
-                          Content="Oturum şifresini kaldır"
-                          Foreground="{StaticResource TextSecondaryBrush}"
-                          Margin="0,0,0,20"/>
+            <CheckBox x:Name="ChkClearPassword"
+                      Content="Oturum şifresini kaldır"
+                      Foreground="{StaticResource TextSecondaryBrush}"
+                      Margin="0,0,0,18"/>
 
-                <TextBlock Text="GÜNCELLEME"
-                           Foreground="{StaticResource TextMutedBrush}"
-                           FontSize="10"
-                           FontWeight="SemiBold"
-                           Margin="0,0,0,8"/>
+            <TextBlock Text="GÜNCELLEME"
+                       Foreground="{StaticResource TextMutedBrush}"
+                       FontSize="10"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
 
-                <TextBlock x:Name="TxtVersion"
-                           Foreground="{StaticResource TextPrimaryBrush}"
-                           FontSize="12"
-                           Margin="0,0,0,8"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-                <TextBlock Text="Açılışta otomatik kontrol edilir; güncelleme varsa arka planda uygulanır."
-                           Foreground="{StaticResource TextSecondaryBrush}"
-                           FontSize="11"
-                           TextWrapping="Wrap"
-                           Margin="0,0,0,8"/>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock x:Name="TxtVersion"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               FontSize="12"/>
+
+                    <TextBlock x:Name="TxtUpdateStatus"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               FontSize="11"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
 
                 <Button x:Name="BtnCheckUpdate"
+                        Grid.Column="1"
                         Content="Güncellemeleri kontrol et"
                         Style="{StaticResource SecondaryButton}"
                         Click="BtnCheckUpdate_Click"
-                        Margin="0,0,0,8"/>
-
-                <TextBlock x:Name="TxtUpdateStatus"
-                           Foreground="{StaticResource TextSecondaryBrush}"
-                           FontSize="11"
-                           TextWrapping="Wrap"/>
-            </StackPanel>
-        </ScrollViewer>
+                        ToolTip="Açılışta otomatik kontrol edilir; güncelleme varsa arka planda uygulanır."/>
+            </Grid>
+        </StackPanel>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="24,0,24,20">
             <Button Content="İptal"

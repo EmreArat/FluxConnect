@@ -20,6 +20,7 @@ public partial class SettingsWindow : Window
         ChkStartWithWindows.IsChecked = config.StartWithWindows;
         ChkStartMinimizedToTray.IsChecked = config.StartMinimizedToTray;
         TxtRelayUrl.Text = config.RelayUrl ?? string.Empty;
+        TxtRelayFingerprint.Text = CertificatePinning.ToDisplay(config.RelayCertFingerprint ?? string.Empty);
         TxtVersion.Text = $"Sürüm: {UpdateService.CurrentVersion}";
         TxtUpdateStatus.Text = string.Empty;
     }
@@ -37,8 +38,19 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        var relayChanged = !string.Equals(config.RelayUrl, relayUrl, StringComparison.OrdinalIgnoreCase);
+        if (!CertificatePinning.TryNormalize(TxtRelayFingerprint.Text, out var fingerprint, out var fingerprintError))
+        {
+            MessageBox.Show(fingerprintError, "Ayarlar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var storedFingerprint = string.IsNullOrEmpty(fingerprint) ? null : fingerprint;
+        var relayChanged =
+            !string.Equals(config.RelayUrl, relayUrl, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(config.RelayCertFingerprint, storedFingerprint, StringComparison.OrdinalIgnoreCase);
+
         config.RelayUrl = relayUrl;
+        config.RelayCertFingerprint = storedFingerprint;
 
         if (ChkClearPassword.IsChecked == true)
         {
@@ -68,7 +80,10 @@ public partial class SettingsWindow : Window
         StartupHelper.ConfigureStartup(config.StartWithWindows, config.StartMinimizedToTray);
 
         if (relayChanged || !App.Relay.IsConnected)
+        {
+            App.MainWindowInstance?.NotifyRelayReconnecting();
             _ = App.Session.ReconnectRelayAsync();
+        }
         else
             _ = App.Session.RefreshRegistrationAsync();
 

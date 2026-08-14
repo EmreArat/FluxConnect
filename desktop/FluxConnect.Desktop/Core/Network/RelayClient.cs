@@ -30,7 +30,7 @@ public class RelayClient : IDisposable
         _sendPipeline = new RelaySendPipeline(SendJsonDirectAsync, SendBinaryDirectAsync);
     }
 
-    public async Task ConnectAsync(string relayUrl, CancellationToken cancellationToken = default)
+    public async Task ConnectAsync(string relayUrl, string? pinnedFingerprint = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(relayUrl))
             throw new ArgumentException("Relay adresi boş.", nameof(relayUrl));
@@ -43,6 +43,19 @@ public class RelayClient : IDisposable
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ws = new ClientWebSocket();
 
+        // Parmak izi girilmişse yalnızca o sertifikaya güvenilir; böylece kendinden
+        // imzalı sunucu sertifikaları zincir doğrulamasına takılmadan kabul edilir.
+        string? seenFingerprint = null;
+        if (!string.IsNullOrEmpty(pinnedFingerprint))
+        {
+            _ws.Options.RemoteCertificateValidationCallback = (_, certificate, _, _) =>
+            {
+                if (certificate is null) return false;
+                seenFingerprint = CertificatePinning.ComputeFingerprint(certificate);
+                return string.Equals(seenFingerprint, pinnedFingerprint, StringComparison.OrdinalIgnoreCase);
+            };
+        }
+
         try
         {
             await _ws.ConnectAsync(new Uri(relayUrl), _cts.Token);
@@ -51,7 +64,17 @@ public class RelayClient : IDisposable
         }
         catch (Exception)
         {
-            OnError?.Invoke("Sadece Yerel Ağ (LAN) Modu - İnternet Relay Sunucusuna ulaşılamadı.");
+            if (seenFingerprint is not null &&
+                !string.Equals(seenFingerprint, pinnedFingerprint, StringComparison.OrdinalIgnoreCase))
+            {
+                OnError?.Invoke(
+                    "Relay sertifikası, Ayarlar'daki parmak izine uymuyor. Bağlantı güvenlik nedeniyle kesildi. " +
+                    $"Sunucunun parmak izi: {CertificatePinning.ToDisplay(seenFingerprint)}");
+            }
+            else
+            {
+                OnError?.Invoke("Sadece Yerel Ağ (LAN) Modu - İnternet Relay Sunucusuna ulaşılamadı.");
+            }
             throw;
         }
     }
@@ -234,12 +257,13 @@ public class RelayClient : IDisposable
         {
             try
             {
-                await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Kullanıcı kapattı", CancellationToken.None);
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Kullanıcı kapattı", timeout.Token);
             }
-            catch { }
+            catch { /* Zaman aşımı veya ağ hatası — soketi yine de bırak */ }
         }
 
-        _ws?.Dispose();
+        try { _ws?.Dispose(); } catch { }
         _ws = null;
     }
 

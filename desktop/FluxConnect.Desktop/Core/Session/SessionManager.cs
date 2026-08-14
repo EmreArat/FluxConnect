@@ -62,6 +62,7 @@ public class SessionManager : IDisposable
     public ActiveSession? CurrentSession { get; private set; }
 
     private readonly Dictionary<string, (string FromId, string FromName)> _pendingIncoming = new();
+    private int _suppressDisconnectNotify;
 
     public SessionManager(RelayClient relay, AppConfig config)
     {
@@ -74,7 +75,12 @@ public class SessionManager : IDisposable
             // Relay'e bağlandıktan sonra kişi listesindeki ID'lere abone ol
             _ = SubscribeToContactsAsync();
         };
-        _relay.OnDisconnected += () => OnRelayDisconnected?.Invoke();
+        _relay.OnDisconnected += () =>
+        {
+            if (Volatile.Read(ref _suppressDisconnectNotify) > 0)
+                return;
+            OnRelayDisconnected?.Invoke();
+        };
         _relay.OnError += msg => OnRelayError?.Invoke(msg);
         _relay.OnMessageReceived += HandleMessage;
         _relay.OnRelayFrameReceived += HandleRelayFrame;
@@ -133,6 +139,13 @@ public class SessionManager : IDisposable
         if (existing == null)
             existing = _config.Contacts.FirstOrDefault(c => c.Address == address);
 
+        // hw:XXX ile kayıtlı eski kişiyi, aynı donanımın 9 haneli ID'siyle eşleştir
+        if (existing == null && IsNineDigitMachineId(address) && !string.IsNullOrEmpty(hardwareId))
+        {
+            existing = _config.Contacts.FirstOrDefault(c =>
+                c.Address.Equals(HardwareIdProvider.FormatAddress(hardwareId), StringComparison.OrdinalIgnoreCase));
+        }
+
         if (existing != null)
         {
             existing.LastConnected = DateTime.Now;
@@ -140,21 +153,31 @@ public class SessionManager : IDisposable
                 existing.DisplayName = displayName;
 
             if (!string.IsNullOrEmpty(hardwareId))
-            {
                 existing.HardwareId = hardwareId;
-                existing.Address = HardwareIdProvider.FormatAddress(hardwareId);
-            }
 
             if (!string.IsNullOrEmpty(lastKnownIp))
                 existing.LastKnownIp = lastKnownIp;
+
+            // 9 haneli Makine ID asla hw:GUID ile ezilmesin — presence buna bağlı
+            if (IsNineDigitMachineId(address))
+                existing.Address = address;
+            else if (!existing.IsRelayContact)
+            {
+                if (!string.IsNullOrEmpty(hardwareId))
+                    existing.Address = HardwareIdProvider.FormatAddress(hardwareId);
+                else
+                    existing.Address = address;
+            }
         }
         else
         {
             var contact = new SavedContact
             {
-                Address = !string.IsNullOrEmpty(hardwareId)
-                    ? HardwareIdProvider.FormatAddress(hardwareId)
-                    : address,
+                Address = IsNineDigitMachineId(address)
+                    ? address
+                    : (!string.IsNullOrEmpty(hardwareId)
+                        ? HardwareIdProvider.FormatAddress(hardwareId)
+                        : address),
                 DisplayName = displayName,
                 HardwareId = hardwareId,
                 LastKnownIp = lastKnownIp,
@@ -165,6 +188,9 @@ public class SessionManager : IDisposable
 
         ConfigManager.Save(_config);
     }
+
+    private static bool IsNineDigitMachineId(string? value) =>
+        !string.IsNullOrEmpty(value) && value.Length == 9 && value.All(char.IsDigit);
 
     /// <summary>LAN sunucusu event'lerini bağlar (App.xaml.cs'den çağrılır)</summary>
     public void BindLanServer(LocalServer server)
@@ -265,24 +291,32 @@ public class SessionManager : IDisposable
         if (string.IsNullOrWhiteSpace(_config.RelayUrl))
             return false;
 
-        await _relay.ConnectAsync(_config.RelayUrl);
+        await _relay.ConnectAsync(_config.RelayUrl, _config.RelayCertFingerprint);
         await RegisterOnRelayAsync();
         return true;
     }
 
     public async Task ReconnectRelayAsync()
     {
-        try { await _relay.DisconnectAsync(); }
-        catch { /* Yeniden bağlanırken eski soket kapanmayabilir */ }
-
+        Interlocked.Increment(ref _suppressDisconnectNotify);
         try
         {
-            if (!await StartAsync())
+            try { await _relay.DisconnectAsync(); }
+            catch { /* Yeniden bağlanırken eski soket kapanmayabilir */ }
+
+            try
+            {
+                if (!await StartAsync())
+                    OnRelayDisconnected?.Invoke();
+            }
+            catch
+            {
                 OnRelayDisconnected?.Invoke();
+            }
         }
-        catch
+        finally
         {
-            OnRelayDisconnected?.Invoke();
+            Interlocked.Decrement(ref _suppressDisconnectNotify);
         }
     }
 

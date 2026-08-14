@@ -113,13 +113,40 @@ public partial class App : Application
         }
     }
 
-    protected override async void OnExit(ExitEventArgs e)
+    protected override void OnExit(ExitEventArgs e)
     {
-        Tray?.Dispose();
-        LanDiscovery?.Dispose();
-        LanServer?.Dispose();
-        await Relay.DisconnectAsync();
-        Relay.Dispose();
+        try
+        {
+            Tray?.Dispose();
+        }
+        catch { }
+
+        try { LanDiscovery?.Dispose(); } catch { }
+        try { LanServer?.Dispose(); } catch { }
+
+        try
+        {
+            // CloseAsync ağda takılırsa süreç Görev Yöneticisi'nde kalmasın
+            if (Relay != null)
+            {
+                var disconnect = Relay.DisconnectAsync();
+                if (!disconnect.Wait(TimeSpan.FromSeconds(3)))
+                {
+                    try { Relay.Dispose(); } catch { }
+                }
+                else
+                {
+                    try { Relay.Dispose(); } catch { }
+                }
+            }
+        }
+        catch
+        {
+            try { Relay?.Dispose(); } catch { }
+        }
+
+        try { Session?.Dispose(); } catch { }
+
         base.OnExit(e);
     }
 }
